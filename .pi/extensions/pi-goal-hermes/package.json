@@ -1,0 +1,13 @@
+{
+	"name": "pi-goal-hermes",
+	"private": true,
+	"version": "0.1.0",
+	"type": "module",
+	"pi": {
+		"extensions": ["./index.ts"]
+	},
+	"peerDependencies": {
+		"@earendil-works/pi-ai": "^0.75.3",
+		"@earendil-works/pi-coding-agent": "^0.75.3"
+	}
+}

@@ -1,0 +1,36 @@
+parent:
+  number: 1
+  url: https://github.com/ricoyudog/pi/issues/1
+groups:
+  - number: 1
+    name: "Extension Scaffold & State Types"
+    issue_number: 2
+    url: https://github.com/ricoyudog/pi/issues/2
+  - number: 2
+    name: "Judge Service"
+    issue_number: 3
+    url: https://github.com/ricoyudog/pi/issues/3
+  - number: 3
+    name: "Core Evaluation Logic"
+    issue_number: 4
+    url: https://github.com/ricoyudog/pi/issues/4
+  - number: 4
+    name: "Continuation Prompt & Queue Mechanism"
+    issue_number: 5
+    url: https://github.com/ricoyudog/pi/issues/5
+  - number: 5
+    name: "Event Handlers Integration"
+    issue_number: 6
+    url: https://github.com/ricoyudog/pi/issues/6
+  - number: 6
+    name: "Slash Commands"
+    issue_number: 7
+    url: https://github.com/ricoyudog/pi/issues/7
+  - number: 7
+    name: "Message Rendering & Polish"
+    issue_number: 8
+    url: https://github.com/ricoyudog/pi/issues/8
+  - number: 8
+    name: "Regression Tests & Edge Cases"
+    issue_number: 9
+    url: https://github.com/ricoyudog/pi/issues/9

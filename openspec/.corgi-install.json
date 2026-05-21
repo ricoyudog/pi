@@ -1,0 +1,33 @@
+{
+  "version": 1,
+  "installedAt": "2026-05-21T05:37:14Z",
+  "updatedAt": "2026-05-21T05:37:14Z",
+  "sourceRepo": "~/.config/opencode/skill/corgispec-install",
+  "schema": "github-tracked",
+  "isolation": { "mode": "none" },
+  "files": {
+    ".opencode/commands/corgi-apply.md": { "sha256": "b97b938f8cdc03217beea50a0b9d94a02beb51c0660cb88b0ca05e6f21a4a9de" },
+    ".opencode/commands/corgi-archive.md": { "sha256": "200ec7e705fe85144a78f37059cd28f51fea23863da566a29b75dea7f3b21ff3" },
+    ".opencode/commands/corgi-ask.md": { "sha256": "7c9d6d5d38d2cc12cd05550a6979372fb9ff76a3d8cb1879b257970114c112dc" },
+    ".opencode/commands/corgi-explore.md": { "sha256": "9e8f10b42dfbcbbdd6df11df234caac7ce6701f4f9ca5c50167217906598e596" },
+    ".opencode/commands/corgi-install.md": { "sha256": "82902c66aee0323650a13cf23498b5c1bc331ee28b29e3f0c99467b73dedc2ab" },
+    ".opencode/commands/corgi-lint.md": { "sha256": "568fad3bc609a4443dbcd4410fb978c015ea4e7d464c43afc59fbad76b8add03" },
+    ".opencode/commands/corgi-memory-init.md": { "sha256": "aeb76990d8905dd0d6ccfdd22ee7ec0d55209b44a35cdafce1c9a238b214d7a2" },
+    ".opencode/commands/corgi-migrate.md": { "sha256": "ed211578de6f1b5268f9b7602d44b01ea2ac1ac911845e36d3bd19044ce4c301" },
+    ".opencode/commands/corgi-propose.md": { "sha256": "8bae15f6b36c6e9786e38c5c44b09abacc8e3827c6551186db67b895289d5273" },
+    ".opencode/commands/corgi-review.md": { "sha256": "2e29b161df33fbfd1789c2175665b6b0e04df1f8cb796558762fc8b588e6324d" },
+    ".opencode/commands/corgi-verify.md": { "sha256": "4696028843f0a77e73908abc53005918914ed06c84fc5d63b740e67c7d845fd0" },
+    ".claude/commands/corgi/apply.md": { "sha256": "151f4e63582864d7eb7ee42f0ad2803c80fd52fc2e482cb0c476a6d55f9d6669" },
+    ".claude/commands/corgi/archive.md": { "sha256": "8ccf7ad1e80620f66ed52607a19b59a31cfdbc43a9fce07da023abe2a46ebe49" },
+    ".claude/commands/corgi/explore.md": { "sha256": "c323cd7e83f152e2cd39d21b299a802d9e4e643f53afa016fe43a5df77366581" },
+    ".claude/commands/corgi/install.md": { "sha256": "57d360bd582baf1c4597a08ce8e1eb67601e6eacf6b13da5c04443b68638f3be" },
+    ".claude/commands/corgi/propose.md": { "sha256": "7046971fc8203e323f2f4cad938d2a6686d20fe0c05e6c23b332ca165972ea2a" },
+    ".claude/commands/corgi/review.md": { "sha256": "f00bf2ea8ad1a99120b8999cc0b74ec90e32a94d22a432c7980caa3cd9a04073" },
+    ".claude/commands/corgi/verify.md": { "sha256": "e429533997ad1a44ed559533bb8ea75c2620aed5a092e10f4281d08eae32998e" },
+    "openspec/schemas/github-tracked/schema.yaml": { "sha256": "0e1f68c8a771ce9e3f8ff5cc80cbeb7458a94c1c00f394088b8c419099a8b03b" },
+    "openspec/schemas/github-tracked/templates/design.md": { "sha256": "3395daa1c2f335aab03e4773a7d8a7d2c369579d153d359e7bb44420cacbd157" },
+    "openspec/schemas/github-tracked/templates/proposal.md": { "sha256": "f95443494733df102974c4ac27c6f693757b82b2378b1240d39d13b7f3738b85" },
+    "openspec/schemas/github-tracked/templates/spec.md": { "sha256": "e025078f238dc6e4df552a1e0a140cf9efce0bbdecbeb9f45837d45ed91dca01" },
+    "openspec/schemas/github-tracked/templates/tasks.md": { "sha256": "ec0186d5b119d149e9b5ddb913a0b809ecb2499cea276a03183fc2f5658416f8" }
+  }
+}
