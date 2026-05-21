@@ -13,15 +13,15 @@
 
 ## 2. Judge Service
 
-- [ ] 2.1 Implement `JUDGE_SYSTEM_PROMPT` constant matching Hermes source verbatim (three OR paths for DONE, single-line JSON output requirement)
-- [ ] 2.2 Implement `buildJudgeUserPrompt(goal, response)` function matching Hermes template
-- [ ] 2.3 Implement `buildJudgeUserPromptWithSubgoals(goal, response, subgoals)` function matching Hermes template with numbered criteria and specific-evidence instruction
-- [ ] 2.4 Implement `truncate(text, maxLen)` utility (goal<=2000, response<=4000, subgoals<=2000)
-- [ ] 2.5 Implement `parseJudgeResponse(raw)` with 3-tier fallback: (1) clean JSON, (2) markdown fence extraction, (3) regex embedded JSON search. Return `{ done, reason, parseFailed }`
-- [ ] 2.6 Implement `JudgeService.evaluate(input, ctx)`: model lookup via `ctx.modelRegistry.find` (claude-haiku-4-5 then gpt-4o-mini), auth via `getApiKeyAndHeaders`, `streamSimple` with temperature=0, timeoutMs=30000, signal=ctx.signal
-- [ ] 2.7 Implement fail-open error handling in `JudgeService.evaluate`: no model -> continue/no-counter, auth failure -> continue/no-counter, API/transport error -> continue/no-counter
-- [ ] 2.8 Write unit tests for `parseJudgeResponse`: clean JSON, markdown fence, prose embedded, completely unparseable
-- [ ] 2.9 Write unit tests for `JudgeService.evaluate` with mocked streamSimple: done verdict, continue verdict, API error, auth failure, no model available, timeout
+- [x] 2.1 Implement `JUDGE_SYSTEM_PROMPT` constant matching Hermes source verbatim (three OR paths for DONE, single-line JSON output requirement)
+- [x] 2.2 Implement `buildJudgeUserPrompt(goal, response)` function matching Hermes template
+- [x] 2.3 Implement `buildJudgeUserPromptWithSubgoals(goal, response, subgoals)` function matching Hermes template with numbered criteria and specific-evidence instruction
+- [x] 2.4 Implement `truncate(text, maxLen)` utility (goal<=2000, response<=4000, subgoals<=2000)
+- [x] 2.5 Implement `parseJudgeResponse(raw)` with 3-tier fallback: (1) clean JSON, (2) markdown fence extraction, (3) regex embedded JSON search. Return `{ done, reason, parseFailed }`
+- [x] 2.6 Implement `JudgeService.evaluate(input, ctx)`: model lookup via `ctx.modelRegistry.find` (claude-haiku-4-5 then gpt-4o-mini), auth via `getApiKeyAndHeaders`, `streamSimple` with temperature=0, timeoutMs=30000, signal=ctx.signal
+- [x] 2.7 Implement fail-open error handling in `JudgeService.evaluate`: no model -> continue/no-counter, auth failure -> continue/no-counter, API/transport error -> continue/no-counter
+- [x] 2.8 Write unit tests for `parseJudgeResponse`: clean JSON, markdown fence, prose embedded, completely unparseable
+- [x] 2.9 Write unit tests for `JudgeService.evaluate` with mocked streamSimple: done verdict, continue verdict, API error, auth failure, no model available, timeout
 
 ## 3. Core Evaluation Logic
 
