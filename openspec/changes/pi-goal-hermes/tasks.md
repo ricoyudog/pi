@@ -25,13 +25,16 @@
 
 ## 3. Core Evaluation Logic
 
-- [ ] 3.1 Implement `evaluateWithJudge(pi, ctx, state, lastResponse)` in `goal-manager.ts` following exact Hermes sequence: (1) turnsUsed++ (2) call judge (3) check done (4) update parse counter (5) check >=3 failures (6) check budget (7) return continue
-- [ ] 3.2 On verdict="done": set status="done", persist, return `{ shouldContinue: false, statusMessage: "Goal achieved" }`
-- [ ] 3.3 On parseFailed: increment consecutiveParseFailures; on success: reset to 0
-- [ ] 3.4 On consecutiveParseFailures >= 3: set status="paused" with reason, persist, return shouldContinue=false
-- [ ] 3.5 On turnsUsed >= maxTurns: set status="paused" with budget reason, persist, return shouldContinue=false
-- [ ] 3.6 On continue (normal): persist updated state, return `{ shouldContinue: true, continuationPrompt: makeContinuationPrompt(state) }`
-- [ ] 3.7 Write unit tests covering all branches: done, continue, parse-fail-open, parse-fail-pause, budget-exhausted, counter-reset-on-success
+- [x] 3.1 Implement `evaluateWithJudge(pi, ctx, state, lastResponse)` in `goal-manager.ts` following exact Hermes sequence: (1) turnsUsed++ (2) call judge (3) check done (4) update parse counter (5) check >=3 failures (6) check budget (7) return continue
+- [x] 3.2 On verdict="done": set status="done", persist, return `{ shouldContinue: false, statusMessage: "Goal achieved" }`
+- [x] 3.3 On parseFailed: increment consecutiveParseFailures; on success: reset to 0
+- [x] 3.4 On consecutiveParseFailures >= 3: set status="paused" with reason, persist, return shouldContinue=false
+- [x] 3.5 On turnsUsed >= maxTurns: set status="paused" with budget reason, persist, return shouldContinue=false
+- [x] 3.6 On continue (normal): persist updated state, return `{ shouldContinue: true, continuationPrompt: makeContinuationPrompt(state) }`
+- [x] 3.7 Write unit tests covering all branches: done, continue, parse-fail-open, parse-fail-pause, budget-exhausted, counter-reset-on-success
+- [x] 3.8 Align fail-open judge results with the OpenSpec contract by returning `verdict="continue"` for no-model, auth-failure, and transport-error paths while preserving `consecutiveParseFailures` for those fail-open outcomes
+- [x] 3.9 Update Group 3 unit tests to assert continue/no-counter semantics for fail-open judge results in both `JudgeService.evaluate()` and `evaluateWithJudge()`
+- [x] 3.10 Update the pi-goal-hermes design artifact to remove the `skipped` verdict and document the continue-plus-preserve-counter behavior for fail-open judge paths
 
 ## 4. Continuation Prompt & Queue Mechanism
 

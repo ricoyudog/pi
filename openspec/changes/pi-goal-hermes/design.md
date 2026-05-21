@@ -126,7 +126,7 @@ The idle macrotask defers injection to after the current event loop tick when th
 
 ### 5. Fail-Open Judge Semantics
 
-**Decision:** Judge failures (API errors, timeouts, auth failures) result in `continue` verdict without incrementing the parse failure counter. Only actual parse failures (valid response but unparseable output) increment the counter.
+**Decision:** Judge failures (API errors, timeouts, auth failures, no dedicated judge model) result in `continue` verdict without incrementing or resetting the parse failure counter. Only actual parse failures (valid response but unparseable output) increment the counter, and only successfully parsed judge replies reset it.
 
 **Rationale:** Hermes explicitly distinguishes transport failures (fail-open, don't count) from output quality failures (fail-open but count). Three consecutive parse failures trigger auto-pause as a circuit breaker.
 
@@ -161,7 +161,7 @@ interface PiLocalGoalState {
   status: "active" | "paused" | "done" | "cleared";
   turnsUsed: number;                   // Incremented BEFORE judge call
   maxTurns: number;                    // Default 20, configurable at set time
-  lastVerdict: "done" | "continue" | "skipped" | null;
+  lastVerdict: "done" | "continue" | null;
   lastReason: string | null;           // Judge's rationale
   pausedReason: string | null;         // Why paused (budget, parse failures, user, error)
   consecutiveParseFailures: number;    // Reset on successful parse; >=3 triggers auto-pause
