@@ -144,33 +144,41 @@ Is the goal AND every additional criterion satisfied?`);
 
 	it("parses clean JSON responses", () => {
 		expect(parseJudgeResponse('{"done": true, "reason": "goal complete"}')).toEqual({
+			verdict: "done",
 			done: true,
 			reason: "goal complete",
 			parseFailed: false,
+			preserveParseFailureCounter: false,
 		});
 	});
 
 	it("parses markdown fenced JSON responses", () => {
 		expect(parseJudgeResponse('```json\n{"done": false, "reason": "keep going"}\n```')).toEqual({
+			verdict: "continue",
 			done: false,
 			reason: "keep going",
 			parseFailed: false,
+			preserveParseFailureCounter: false,
 		});
 	});
 
 	it("parses prose responses with embedded JSON", () => {
 		expect(parseJudgeResponse('Judge verdict: {"done":"yes","reason":"blocked waiting on user"}')).toEqual({
+			verdict: "done",
 			done: true,
 			reason: "blocked waiting on user",
 			parseFailed: false,
+			preserveParseFailureCounter: false,
 		});
 	});
 
 	it("returns parseFailed when no valid JSON can be extracted", () => {
 		expect(parseJudgeResponse("this is not json")).toEqual({
+			verdict: "continue",
 			done: false,
 			reason: expect.stringContaining("judge reply was not JSON"),
 			parseFailed: true,
+			preserveParseFailureCounter: false,
 		});
 	});
 
@@ -194,7 +202,13 @@ Is the goal AND every additional criterion satisfied?`);
 			createContext({ find, getApiKeyAndHeaders, signal }),
 		);
 
-		expect(result).toEqual({ done: true, reason: "goal complete", parseFailed: false });
+		expect(result).toEqual({
+			verdict: "done",
+			done: true,
+			reason: "goal complete",
+			parseFailed: false,
+			preserveParseFailureCounter: false,
+		});
 		expect(find).toHaveBeenNthCalledWith(1, "anthropic", "claude-haiku-4-5");
 		expect(getApiKeyAndHeaders).toHaveBeenCalledWith(anthropicModel);
 		expect(streamSimpleMock).toHaveBeenCalledTimes(1);
@@ -238,7 +252,13 @@ Is the goal AND every additional criterion satisfied?`);
 			createContext({ find, getApiKeyAndHeaders }),
 		);
 
-		expect(result).toEqual({ done: false, reason: "need more work", parseFailed: false });
+		expect(result).toEqual({
+			verdict: "continue",
+			done: false,
+			reason: "need more work",
+			parseFailed: false,
+			preserveParseFailureCounter: false,
+		});
 		expect(find).toHaveBeenNthCalledWith(1, "anthropic", "claude-haiku-4-5");
 		expect(find).toHaveBeenNthCalledWith(2, "openai", "gpt-4o-mini");
 		expect(getApiKeyAndHeaders).toHaveBeenCalledWith(openaiModel);
@@ -256,7 +276,13 @@ Is the goal AND every additional criterion satisfied?`);
 			createContext({ find, getApiKeyAndHeaders }),
 		);
 
-		expect(result).toEqual({ done: false, reason: "missing auth", parseFailed: false });
+		expect(result).toEqual({
+			verdict: "continue",
+			done: false,
+			reason: "missing auth",
+			parseFailed: false,
+			preserveParseFailureCounter: true,
+		});
 		expect(streamSimpleMock).not.toHaveBeenCalled();
 	});
 
@@ -265,7 +291,13 @@ Is the goal AND every additional criterion satisfied?`);
 
 		const result = await new JudgeService().evaluate({ goal: "ship it", response: "done" }, createContext({ find }));
 
-		expect(result).toEqual({ done: false, reason: "no judge model available", parseFailed: false });
+		expect(result).toEqual({
+			verdict: "continue",
+			done: false,
+			reason: "no judge model available",
+			parseFailed: false,
+			preserveParseFailureCounter: true,
+		});
 		expect(streamSimpleMock).not.toHaveBeenCalled();
 	});
 
@@ -283,9 +315,11 @@ Is the goal AND every additional criterion satisfied?`);
 		);
 
 		expect(result).toEqual({
+			verdict: "continue",
 			done: false,
 			reason: expect.stringContaining("network failure"),
 			parseFailed: false,
+			preserveParseFailureCounter: true,
 		});
 	});
 
@@ -303,9 +337,11 @@ Is the goal AND every additional criterion satisfied?`);
 		);
 
 		expect(result).toEqual({
+			verdict: "continue",
 			done: false,
 			reason: expect.stringContaining("timeout"),
 			parseFailed: false,
+			preserveParseFailureCounter: true,
 		});
 	});
 });

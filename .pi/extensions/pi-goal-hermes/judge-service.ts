@@ -26,9 +26,11 @@ export interface JudgeServiceInput {
 }
 
 export interface JudgeVerdict {
+	verdict: "done" | "continue";
 	done: boolean;
 	reason: string;
 	parseFailed: boolean;
+	preserveParseFailureCounter: boolean;
 }
 
 export class JudgeService {
@@ -36,18 +38,22 @@ export class JudgeService {
 		const model = findJudgeModel(ctx);
 		if (!model) {
 			return {
+				verdict: "continue",
 				done: false,
 				reason: "no judge model available",
 				parseFailed: false,
+				preserveParseFailureCounter: true,
 			};
 		}
 
 		const auth = await ctx.modelRegistry.getApiKeyAndHeaders(model);
 		if (!auth.ok) {
 			return {
+				verdict: "continue",
 				done: false,
 				reason: auth.error,
 				parseFailed: false,
+				preserveParseFailureCounter: true,
 			};
 		}
 
@@ -71,9 +77,11 @@ export class JudgeService {
 			return parseJudgeResponse(extractTextContent(message));
 		} catch (error) {
 			return {
+				verdict: "continue",
 				done: false,
 				reason: error instanceof Error ? error.message : String(error),
 				parseFailed: false,
+				preserveParseFailureCounter: true,
 			};
 		}
 	}
@@ -132,9 +140,11 @@ export function parseJudgeResponse(raw: string): JudgeVerdict {
 
 	const snippet = raw.trim().slice(0, RESPONSE_MAX_LENGTH);
 	return {
+		verdict: "continue",
 		done: false,
 		reason: `judge reply was not JSON: ${snippet || "empty response"}`,
 		parseFailed: true,
+		preserveParseFailureCounter: false,
 	};
 }
 
@@ -191,9 +201,11 @@ function tryParseJudgeJson(candidate: string): JudgeVerdict | null {
 		}
 
 		return {
+			verdict: done ? "done" : "continue",
 			done,
 			reason: typeof value.reason === "string" && value.reason.length > 0 ? value.reason : "no reason provided",
 			parseFailed: false,
+			preserveParseFailureCounter: false,
 		};
 	} catch {
 		return null;
