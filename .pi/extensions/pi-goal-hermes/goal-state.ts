@@ -5,7 +5,7 @@ export const GOAL_CUSTOM_TYPE = "pi-goal-hermes:state";
 export const DEFAULT_MAX_TURNS = 20;
 
 export type PiLocalGoalStatus = "active" | "paused" | "done" | "cleared";
-export type PiLocalGoalVerdict = "done" | "continue" | "skipped";
+export type PiLocalGoalVerdict = "done" | "continue";
 
 export interface PiLocalGoalState {
 	id: string;
@@ -84,7 +84,7 @@ function isPiLocalGoalState(value: unknown): value is PiLocalGoalState {
 
 	const hasValidStatus = status === "active" || status === "paused" || status === "done" || status === "cleared";
 	const hasValidVerdict =
-		lastVerdict === null || lastVerdict === "done" || lastVerdict === "continue" || lastVerdict === "skipped";
+		lastVerdict === null || lastVerdict === "done" || lastVerdict === "continue";
 
 	return (
 		typeof value.id === "string" &&
