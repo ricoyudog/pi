@@ -1,4 +1,4 @@
-import type { AgentEndEvent, ExtensionAPI, ExtensionContext, ExtensionHandler, SessionEntry, SessionStartEvent, TurnEndEvent } from "@earendil-works/pi-coding-agent";
+import type { AgentEndEvent, ExtensionAPI, ExtensionCommandContext, ExtensionContext, ExtensionHandler, SessionEntry, SessionStartEvent, TurnEndEvent } from "@earendil-works/pi-coding-agent";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { type ContinuationState, queueContinuation } from "./continuation-prompt.ts";
 import { evaluateWithJudge } from "./goal-manager.ts";
@@ -945,6 +945,379 @@ describe("piGoalHermes event handler integration", () => {
 
 			expect(evaluateSpy).not.toHaveBeenCalled();
 			expect(sendMessage).not.toHaveBeenCalled();
+		});
+	});
+
+	describe("slash command handlers", () => {
+		interface CommandDef {
+			description: string;
+			handler: (args: string, ctx: ExtensionCommandContext) => Promise<void>;
+			getArgumentCompletions?: (prefix: string) => Array<{ value: string; label: string }> | null;
+		}
+
+		function setupCommands(sessionEntries: SessionEntry[] = []) {
+			const handlerMap: Partial<HandlerMap> = {};
+			const mockAppendEntry = vi.fn();
+			const mockSendMessage = vi.fn();
+			const mockNotify = vi.fn();
+			const mockRegisterCommand = vi.fn();
+
+			const mockPi = {
+				on: (event: string, handler: unknown) => {
+					(handlerMap as Record<string, unknown>)[event] = handler;
+				},
+				registerCommand: mockRegisterCommand,
+				appendEntry: mockAppendEntry,
+				sendMessage: mockSendMessage,
+			} as unknown as ExtensionAPI;
+
+			piGoalHermes(mockPi);
+
+			const commands: Record<string, CommandDef> = {};
+			for (const call of mockRegisterCommand.mock.calls) {
+				commands[call[0] as string] = call[1] as CommandDef;
+			}
+
+			function createCommandCtx(overrides: {
+				signal?: { aborted: boolean };
+				hasPendingMessages?: boolean;
+				isIdle?: boolean;
+				entries?: SessionEntry[];
+			} = {}): ExtensionCommandContext {
+				const entries = overrides.entries ?? sessionEntries;
+				return {
+					sessionManager: {
+						getBranch: () => entries,
+						getEntries: () => entries,
+					},
+					ui: { notify: mockNotify },
+					signal: overrides.signal,
+					hasPendingMessages: () => overrides.hasPendingMessages ?? false,
+					isIdle: () => overrides.isIdle ?? true,
+				} as unknown as ExtensionCommandContext;
+			}
+
+			return {
+				commands,
+				handlers: handlerMap as HandlerMap,
+				appendEntry: mockAppendEntry,
+				sendMessage: mockSendMessage,
+				notify: mockNotify,
+				createCtx: createCommandCtx,
+			};
+		}
+
+		describe("/goal command", () => {
+			it("shows 'no goal' status when none is set", async () => {
+				const { commands, createCtx, notify } = setupCommands([]);
+				await commands.goal.handler("", createCtx());
+				expect(notify).toHaveBeenCalledWith(
+					expect.stringContaining("No goal is set"),
+					"info",
+				);
+			});
+
+			it("shows 'no goal' status with explicit 'status' arg when none set", async () => {
+				const { commands, createCtx, notify } = setupCommands([]);
+				await commands.goal.handler("status", createCtx());
+				expect(notify).toHaveBeenCalledWith(
+					expect.stringContaining("No goal is set"),
+					"info",
+				);
+			});
+
+			it("shows goal status when one is active", async () => {
+				const goal = createPiLocalGoalState("ship feature");
+				const entries = [makeGoalEntry(goal)];
+				const { commands, handlers, createCtx, notify } = setupCommands(entries);
+				handlers.session_start({ type: "session_start", reason: "startup" }, createCtx() as unknown as ExtensionContext);
+				await commands.goal.handler("status", createCtx());
+				expect(notify).toHaveBeenCalledWith(
+					expect.stringContaining("ship feature"),
+					"info",
+				);
+				expect(notify).toHaveBeenCalledWith(
+					expect.stringContaining("active"),
+					"info",
+				);
+			});
+
+			it("sets a new goal", async () => {
+				const { commands, createCtx, notify, appendEntry } = setupCommands([]);
+				await commands.goal.handler("build the widget", createCtx());
+				expect(notify).toHaveBeenCalledWith("Goal set: build the widget", "info");
+				expect(appendEntry).toHaveBeenCalledWith(
+					GOAL_CUSTOM_TYPE,
+					expect.objectContaining({
+						goal: expect.objectContaining({ goal: "build the widget", status: "active" }),
+					}),
+				);
+			});
+
+			it("replaces active goal and notifies", async () => {
+				const goal = createPiLocalGoalState("old goal");
+				const entries = [makeGoalEntry(goal)];
+				const { commands, handlers, createCtx, notify } = setupCommands(entries);
+				handlers.session_start({ type: "session_start", reason: "startup" }, createCtx() as unknown as ExtensionContext);
+
+				await commands.goal.handler("new goal", createCtx());
+				expect(notify).toHaveBeenCalledWith(
+					expect.stringContaining('Replacing active goal: "old goal"'),
+					"info",
+				);
+				expect(notify).toHaveBeenCalledWith("Goal set: new goal", "info");
+			});
+
+			it("pauses an active goal with /goal pause", async () => {
+				const goal = createPiLocalGoalState("active goal");
+				const entries = [makeGoalEntry(goal)];
+				const { commands, handlers, createCtx, notify, appendEntry } = setupCommands(entries);
+				handlers.session_start({ type: "session_start", reason: "startup" }, createCtx() as unknown as ExtensionContext);
+
+				await commands.goal.handler("pause", createCtx());
+				expect(notify).toHaveBeenCalledWith("Goal paused (user pause).", "info");
+				expect(appendEntry).toHaveBeenCalledWith(
+					GOAL_CUSTOM_TYPE,
+					expect.objectContaining({
+						goal: expect.objectContaining({ status: "paused", pausedReason: "user pause" }),
+					}),
+				);
+			});
+
+			it("stops an active goal with /goal stop", async () => {
+				const goal = createPiLocalGoalState("active goal");
+				const entries = [makeGoalEntry(goal)];
+				const { commands, handlers, createCtx, notify, appendEntry } = setupCommands(entries);
+				handlers.session_start({ type: "session_start", reason: "startup" }, createCtx() as unknown as ExtensionContext);
+
+				await commands.goal.handler("stop", createCtx());
+				expect(notify).toHaveBeenCalledWith("Goal paused (user stop).", "info");
+				expect(appendEntry).toHaveBeenCalledWith(
+					GOAL_CUSTOM_TYPE,
+					expect.objectContaining({
+						goal: expect.objectContaining({ status: "paused", pausedReason: "user stop" }),
+					}),
+				);
+			});
+
+			it("warns when pausing with no active goal", async () => {
+				const { commands, createCtx, notify } = setupCommands([]);
+				await commands.goal.handler("pause", createCtx());
+				expect(notify).toHaveBeenCalledWith("No active goal to pause.", "warning");
+			});
+
+			it("resumes a paused goal", async () => {
+				const goal = { ...createPiLocalGoalState("paused goal"), status: "paused" as const, pausedReason: "user pause" };
+				const entries = [makeGoalEntry(goal)];
+				const { commands, handlers, createCtx, notify, appendEntry } = setupCommands(entries);
+				handlers.session_start({ type: "session_start", reason: "startup" }, createCtx() as unknown as ExtensionContext);
+
+				await commands.goal.handler("resume", createCtx());
+				expect(notify).toHaveBeenCalledWith("Goal resumed: paused goal", "info");
+				expect(appendEntry).toHaveBeenCalledWith(
+					GOAL_CUSTOM_TYPE,
+					expect.objectContaining({
+						goal: expect.objectContaining({ status: "active", turnsUsed: 0, consecutiveParseFailures: 0, pausedReason: null }),
+					}),
+				);
+			});
+
+			it("warns when resuming with no paused goal", async () => {
+				const { commands, createCtx, notify } = setupCommands([]);
+				await commands.goal.handler("resume", createCtx());
+				expect(notify).toHaveBeenCalledWith("No paused goal to resume.", "warning");
+			});
+
+			it("marks an active goal as done", async () => {
+				const goal = createPiLocalGoalState("done goal");
+				const entries = [makeGoalEntry(goal)];
+				const { commands, handlers, createCtx, notify, appendEntry } = setupCommands(entries);
+				handlers.session_start({ type: "session_start", reason: "startup" }, createCtx() as unknown as ExtensionContext);
+
+				await commands.goal.handler("done", createCtx());
+				expect(notify).toHaveBeenCalledWith("Goal marked done.", "info");
+				expect(appendEntry).toHaveBeenCalledWith(
+					GOAL_CUSTOM_TYPE,
+					expect.objectContaining({
+						goal: expect.objectContaining({ status: "done", lastVerdict: "done", lastReason: "marked done by user" }),
+					}),
+				);
+			});
+
+			it("warns when marking done with no goal", async () => {
+				const { commands, createCtx, notify } = setupCommands([]);
+				await commands.goal.handler("done", createCtx());
+				expect(notify).toHaveBeenCalledWith("No goal to mark done.", "warning");
+			});
+
+			it("clears a goal", async () => {
+				const goal = createPiLocalGoalState("to clear");
+				const entries = [makeGoalEntry(goal)];
+				const { commands, handlers, createCtx, notify, appendEntry } = setupCommands(entries);
+				handlers.session_start({ type: "session_start", reason: "startup" }, createCtx() as unknown as ExtensionContext);
+
+				await commands.goal.handler("clear", createCtx());
+				expect(notify).toHaveBeenCalledWith("Goal cleared.", "info");
+				expect(appendEntry).toHaveBeenCalledWith(
+					GOAL_CUSTOM_TYPE,
+					expect.objectContaining({
+						goal: expect.objectContaining({ status: "cleared" }),
+					}),
+				);
+			});
+
+			it("warns when clearing with no goal", async () => {
+				const { commands, createCtx, notify } = setupCommands([]);
+				await commands.goal.handler("clear", createCtx());
+				expect(notify).toHaveBeenCalledWith("No goal to clear.", "warning");
+			});
+
+			it("provides argument completions", () => {
+				const { commands } = setupCommands([]);
+				const completions = commands.goal.getArgumentCompletions!("");
+				expect(completions).toEqual(
+					expect.arrayContaining([
+						expect.objectContaining({ value: "status" }),
+						expect.objectContaining({ value: "pause" }),
+						expect.objectContaining({ value: "stop" }),
+						expect.objectContaining({ value: "resume" }),
+						expect.objectContaining({ value: "done" }),
+						expect.objectContaining({ value: "clear" }),
+					]),
+				);
+			});
+
+			it("filters argument completions by prefix", () => {
+				const { commands } = setupCommands([]);
+				const completions = commands.goal.getArgumentCompletions!("s");
+				expect(completions).toEqual(
+					expect.arrayContaining([
+						expect.objectContaining({ value: "status" }),
+						expect.objectContaining({ value: "stop" }),
+					]),
+				);
+				expect(completions!.length).toBe(2);
+			});
+		});
+
+		describe("/subgoal command", () => {
+			it("warns when no goal set on /subgoal list", async () => {
+				const { commands, createCtx, notify } = setupCommands([]);
+				await commands.subgoal.handler("", createCtx());
+				expect(notify).toHaveBeenCalledWith("No goal is set.", "warning");
+			});
+
+			it("shows empty subgoals message", async () => {
+				const goal = createPiLocalGoalState("main goal");
+				const entries = [makeGoalEntry(goal)];
+				const { commands, handlers, createCtx, notify } = setupCommands(entries);
+				handlers.session_start({ type: "session_start", reason: "startup" }, createCtx() as unknown as ExtensionContext);
+
+				await commands.subgoal.handler("list", createCtx());
+				expect(notify).toHaveBeenCalledWith("No subgoals.", "info");
+			});
+
+			it("adds a subgoal", async () => {
+				const goal = createPiLocalGoalState("main goal");
+				const entries = [makeGoalEntry(goal)];
+				const { commands, handlers, createCtx, notify, appendEntry } = setupCommands(entries);
+				handlers.session_start({ type: "session_start", reason: "startup" }, createCtx() as unknown as ExtensionContext);
+
+				await commands.subgoal.handler("write tests", createCtx());
+				expect(notify).toHaveBeenCalledWith("Subgoal added: write tests", "info");
+				expect(appendEntry).toHaveBeenCalledWith(
+					GOAL_CUSTOM_TYPE,
+					expect.objectContaining({
+						goal: expect.objectContaining({ subgoals: ["write tests"] }),
+					}),
+				);
+			});
+
+			it("lists numbered subgoals", async () => {
+				const goal = { ...createPiLocalGoalState("main goal"), subgoals: ["task A", "task B"] };
+				const entries = [makeGoalEntry(goal)];
+				const { commands, handlers, createCtx, notify } = setupCommands(entries);
+				handlers.session_start({ type: "session_start", reason: "startup" }, createCtx() as unknown as ExtensionContext);
+
+				await commands.subgoal.handler("list", createCtx());
+				expect(notify).toHaveBeenCalledWith("1. task A\n2. task B", "info");
+			});
+
+			it("removes a subgoal by index", async () => {
+				const goal = { ...createPiLocalGoalState("main goal"), subgoals: ["task A", "task B", "task C"] };
+				const entries = [makeGoalEntry(goal)];
+				const { commands, handlers, createCtx, notify, appendEntry } = setupCommands(entries);
+				handlers.session_start({ type: "session_start", reason: "startup" }, createCtx() as unknown as ExtensionContext);
+
+				await commands.subgoal.handler("remove 2", createCtx());
+				expect(notify).toHaveBeenCalledWith("Subgoal removed: task B", "info");
+				expect(appendEntry).toHaveBeenCalledWith(
+					GOAL_CUSTOM_TYPE,
+					expect.objectContaining({
+						goal: expect.objectContaining({ subgoals: ["task A", "task C"] }),
+					}),
+				);
+			});
+
+			it("warns on out-of-range subgoal removal", async () => {
+				const goal = { ...createPiLocalGoalState("main goal"), subgoals: ["task A"] };
+				const entries = [makeGoalEntry(goal)];
+				const { commands, handlers, createCtx, notify } = setupCommands(entries);
+				handlers.session_start({ type: "session_start", reason: "startup" }, createCtx() as unknown as ExtensionContext);
+
+				await commands.subgoal.handler("remove 5", createCtx());
+				expect(notify).toHaveBeenCalledWith("Subgoal index out of range.", "warning");
+			});
+
+			it("warns on non-numeric subgoal removal", async () => {
+				const goal = { ...createPiLocalGoalState("main goal"), subgoals: ["task A"] };
+				const entries = [makeGoalEntry(goal)];
+				const { commands, handlers, createCtx, notify } = setupCommands(entries);
+				handlers.session_start({ type: "session_start", reason: "startup" }, createCtx() as unknown as ExtensionContext);
+
+				await commands.subgoal.handler("remove abc", createCtx());
+				expect(notify).toHaveBeenCalledWith("Subgoal index out of range.", "warning");
+			});
+
+			it("clears all subgoals", async () => {
+				const goal = { ...createPiLocalGoalState("main goal"), subgoals: ["task A", "task B"] };
+				const entries = [makeGoalEntry(goal)];
+				const { commands, handlers, createCtx, notify, appendEntry } = setupCommands(entries);
+				handlers.session_start({ type: "session_start", reason: "startup" }, createCtx() as unknown as ExtensionContext);
+
+				await commands.subgoal.handler("clear", createCtx());
+				expect(notify).toHaveBeenCalledWith("Subgoals cleared.", "info");
+				expect(appendEntry).toHaveBeenCalledWith(
+					GOAL_CUSTOM_TYPE,
+					expect.objectContaining({
+						goal: expect.objectContaining({ subgoals: [] }),
+					}),
+				);
+			});
+
+			it("warns when clearing subgoals with no goal", async () => {
+				const { commands, createCtx, notify } = setupCommands([]);
+				await commands.subgoal.handler("clear", createCtx());
+				expect(notify).toHaveBeenCalledWith("No goal is set.", "warning");
+			});
+
+			it("provides argument completions", () => {
+				const { commands } = setupCommands([]);
+				const completions = commands.subgoal.getArgumentCompletions!("");
+				expect(completions).toEqual(
+					expect.arrayContaining([
+						expect.objectContaining({ value: "list" }),
+						expect.objectContaining({ value: "remove" }),
+						expect.objectContaining({ value: "clear" }),
+					]),
+				);
+			});
+
+			it("filters subgoal argument completions by prefix", () => {
+				const { commands } = setupCommands([]);
+				const completions = commands.subgoal.getArgumentCompletions!("r");
+				expect(completions).toEqual([expect.objectContaining({ value: "remove" })]);
+			});
 		});
 	});
 });

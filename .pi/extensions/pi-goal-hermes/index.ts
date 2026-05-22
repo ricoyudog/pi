@@ -1,7 +1,10 @@
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import { type ContinuationState, queueContinuation } from "./continuation-prompt.ts";
 import { evaluateWithJudge } from "./goal-manager.ts";
-import { latestStateFromSession, persist, type PiLocalGoalState } from "./goal-state.ts";
+import { createPiLocalGoalState, latestStateFromSession, persist, type PiLocalGoalState } from "./goal-state.ts";
+
+const GOAL_SUBCOMMANDS = ["status", "pause", "stop", "resume", "done", "clear"];
+const SUBGOAL_SUBCOMMANDS = ["list", "remove", "clear"];
 
 export default function piGoalHermes(pi: ExtensionAPI) {
 	let goal: PiLocalGoalState | null = null;
@@ -86,17 +89,213 @@ export default function piGoalHermes(pi: ExtensionAPI) {
 	});
 
 	pi.registerCommand("goal", {
-		description: "Manage Pi goal continuation state",
-		handler: async (_args, ctx) => {
-			const status = goal ? `Current goal status: ${goal.status}` : "Goal command is scaffolded.";
-			ctx.ui.notify(status, "info");
+		description: "Manage Pi goal continuation loop (/goal <text> | status | pause | stop | resume | done | clear)",
+		getArgumentCompletions(argumentPrefix: string) {
+			return GOAL_SUBCOMMANDS.filter((cmd) => cmd.startsWith(argumentPrefix)).map((cmd) => ({
+				value: cmd,
+				label: cmd,
+			}));
+		},
+		handler: async (args, ctx) => {
+			const trimmed = args.trim();
+
+			if (!trimmed || trimmed === "status") {
+				handleGoalStatus(ctx);
+				return;
+			}
+
+			if (trimmed === "pause" || trimmed === "stop") {
+				handleGoalPause(ctx, trimmed);
+				return;
+			}
+
+			if (trimmed === "resume") {
+				handleGoalResume(pi, ctx);
+				return;
+			}
+
+			if (trimmed === "done") {
+				handleGoalDone(pi, ctx);
+				return;
+			}
+
+			if (trimmed === "clear") {
+				handleGoalClear(pi, ctx);
+				return;
+			}
+
+			handleGoalSet(pi, ctx, trimmed);
 		},
 	});
 
 	pi.registerCommand("subgoal", {
-		description: "Manage Pi goal acceptance criteria",
-		handler: async (_args, ctx) => {
-			ctx.ui.notify("Subgoal command is scaffolded.", "info");
+		description: "Manage goal acceptance criteria (/subgoal <text> | list | remove <n> | clear)",
+		getArgumentCompletions(argumentPrefix: string) {
+			return SUBGOAL_SUBCOMMANDS.filter((cmd) => cmd.startsWith(argumentPrefix)).map((cmd) => ({
+				value: cmd,
+				label: cmd,
+			}));
+		},
+		handler: async (args, ctx) => {
+			const trimmed = args.trim();
+
+			if (!trimmed || trimmed === "list") {
+				handleSubgoalList(ctx);
+				return;
+			}
+
+			if (trimmed === "clear") {
+				handleSubgoalClear(pi, ctx);
+				return;
+			}
+
+			if (trimmed.startsWith("remove")) {
+				const indexStr = trimmed.slice("remove".length).trim();
+				handleSubgoalRemove(pi, ctx, indexStr);
+				return;
+			}
+
+			handleSubgoalAdd(pi, ctx, trimmed);
 		},
 	});
+
+	function handleGoalStatus(ctx: ExtensionCommandContext) {
+		if (!goal) {
+			ctx.ui.notify("No goal is set. Use /goal <text> to set one.", "info");
+			return;
+		}
+		const lines = [
+			`Goal: ${goal.goal}`,
+			`Status: ${goal.status}`,
+			`Progress: ${goal.turnsUsed}/${goal.maxTurns} turns`,
+		];
+		if (goal.lastVerdict) {
+			lines.push(`Last verdict: ${goal.lastVerdict}`);
+		}
+		if (goal.lastReason) {
+			lines.push(`Reason: ${goal.lastReason}`);
+		}
+		if (goal.pausedReason) {
+			lines.push(`Paused reason: ${goal.pausedReason}`);
+		}
+		ctx.ui.notify(lines.join("\n"), "info");
+	}
+
+	function handleGoalPause(ctx: ExtensionCommandContext, variant: string) {
+		if (!goal || goal.status !== "active") {
+			ctx.ui.notify("No active goal to pause.", "warning");
+			return;
+		}
+		goal.status = "paused";
+		goal.pausedReason = variant === "stop" ? "user stop" : "user pause";
+		goal.updatedAt = Date.now();
+		persist(pi, ctx, goal);
+		ctx.ui.notify(`Goal paused (${goal.pausedReason}).`, "info");
+	}
+
+	function handleGoalResume(pi: ExtensionAPI, ctx: ExtensionCommandContext) {
+		if (!goal || goal.status !== "paused") {
+			ctx.ui.notify("No paused goal to resume.", "warning");
+			return;
+		}
+		goal.turnsUsed = 0;
+		goal.consecutiveParseFailures = 0;
+		goal.status = "active";
+		goal.pausedReason = null;
+		goal.updatedAt = Date.now();
+		persist(pi, ctx, goal);
+		ctx.ui.notify(`Goal resumed: ${goal.goal}`, "info");
+		if (ctx.isIdle()) {
+			queueContinuation(pi, ctx, goal, () => goal, continuationState);
+		}
+	}
+
+	function handleGoalDone(pi: ExtensionAPI, ctx: ExtensionCommandContext) {
+		if (!goal || (goal.status !== "active" && goal.status !== "paused")) {
+			ctx.ui.notify("No goal to mark done.", "warning");
+			return;
+		}
+		goal.status = "done";
+		goal.lastVerdict = "done";
+		goal.lastReason = "marked done by user";
+		goal.pausedReason = null;
+		goal.updatedAt = Date.now();
+		persist(pi, ctx, goal);
+		ctx.ui.notify("Goal marked done.", "info");
+	}
+
+	function handleGoalClear(pi: ExtensionAPI, ctx: ExtensionCommandContext) {
+		if (!goal) {
+			ctx.ui.notify("No goal to clear.", "warning");
+			return;
+		}
+		goal.status = "cleared";
+		goal.updatedAt = Date.now();
+		persist(pi, ctx, goal);
+		goal = null;
+		ctx.ui.notify("Goal cleared.", "info");
+	}
+
+	function handleGoalSet(pi: ExtensionAPI, ctx: ExtensionCommandContext, text: string) {
+		if (goal && goal.status === "active") {
+			ctx.ui.notify(`Replacing active goal: "${goal.goal}"`, "info");
+		}
+		goal = createPiLocalGoalState(text);
+		persist(pi, ctx, goal);
+		ctx.ui.notify(`Goal set: ${text}`, "info");
+		if (ctx.isIdle()) {
+			queueContinuation(pi, ctx, goal, () => goal, continuationState);
+		}
+	}
+
+	function handleSubgoalList(ctx: ExtensionCommandContext) {
+		if (!goal) {
+			ctx.ui.notify("No goal is set.", "warning");
+			return;
+		}
+		if (goal.subgoals.length === 0) {
+			ctx.ui.notify("No subgoals.", "info");
+			return;
+		}
+		const numbered = goal.subgoals.map((sg, i) => `${i + 1}. ${sg}`).join("\n");
+		ctx.ui.notify(numbered, "info");
+	}
+
+	function handleSubgoalAdd(pi: ExtensionAPI, ctx: ExtensionCommandContext, text: string) {
+		if (!goal) {
+			ctx.ui.notify("No goal is set.", "warning");
+			return;
+		}
+		goal.subgoals.push(text);
+		goal.updatedAt = Date.now();
+		persist(pi, ctx, goal);
+		ctx.ui.notify(`Subgoal added: ${text}`, "info");
+	}
+
+	function handleSubgoalRemove(pi: ExtensionAPI, ctx: ExtensionCommandContext, indexStr: string) {
+		if (!goal) {
+			ctx.ui.notify("No goal is set.", "warning");
+			return;
+		}
+		const index = parseInt(indexStr, 10);
+		if (isNaN(index) || index < 1 || index > goal.subgoals.length) {
+			ctx.ui.notify("Subgoal index out of range.", "warning");
+			return;
+		}
+		const removed = goal.subgoals.splice(index - 1, 1)[0];
+		goal.updatedAt = Date.now();
+		persist(pi, ctx, goal);
+		ctx.ui.notify(`Subgoal removed: ${removed}`, "info");
+	}
+
+	function handleSubgoalClear(pi: ExtensionAPI, ctx: ExtensionCommandContext) {
+		if (!goal) {
+			ctx.ui.notify("No goal is set.", "warning");
+			return;
+		}
+		goal.subgoals = [];
+		goal.updatedAt = Date.now();
+		persist(pi, ctx, goal);
+		ctx.ui.notify("Subgoals cleared.", "info");
+	}
 }

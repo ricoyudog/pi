@@ -56,18 +56,18 @@
 
 ## 6. Slash Commands
 
-- [ ] 6.1 Implement `/goal <text>` handler: create new PiLocalGoalState, persist, emit goal event, queue continuation if idle; handle replacement confirmation when active goal exists
-- [ ] 6.2 Implement `/goal status` handler: display goal text, status, progress (turnsUsed/maxTurns), last verdict/reason
-- [ ] 6.3 Implement `/goal pause` and `/goal stop` handlers: transition to paused with appropriate reason, persist
-- [ ] 6.4 Implement `/goal resume` handler: reset turnsUsed=0 and consecutiveParseFailures=0, transition to active, persist, queue continuation if idle
-- [ ] 6.5 Implement `/goal done` handler: transition to done with lastVerdict="done" and lastReason="marked done by user", persist
-- [ ] 6.6 Implement `/goal clear` handler: persist cleared terminal state via appendEntry THEN set runtime goal=null
-- [ ] 6.7 Implement `/subgoal <text>` handler: append to subgoals array, persist, show confirmation
-- [ ] 6.8 Implement `/subgoal list` handler: display numbered subgoals or "No subgoals."
-- [ ] 6.9 Implement `/subgoal remove <n>` handler: validate 1-based index, remove, persist
-- [ ] 6.10 Implement `/subgoal clear` handler: empty subgoals array, persist
-- [ ] 6.11 Register both commands with `pi.registerCommand("goal", {...})` and `pi.registerCommand("subgoal", {...})` including `getArgumentCompletions`
-- [ ] 6.12 Write tests for all command handlers: set/status/pause/stop/resume/done/clear, subgoal add/list/remove/clear, replacement confirmation flow
+- [x] 6.1 Implement `/goal <text>` handler: create new PiLocalGoalState, persist, emit goal event, queue continuation if idle; handle replacement confirmation when active goal exists
+- [x] 6.2 Implement `/goal status` handler: display goal text, status, progress (turnsUsed/maxTurns), last verdict/reason
+- [x] 6.3 Implement `/goal pause` and `/goal stop` handlers: transition to paused with appropriate reason, persist
+- [x] 6.4 Implement `/goal resume` handler: reset turnsUsed=0 and consecutiveParseFailures=0, transition to active, persist, queue continuation if idle
+- [x] 6.5 Implement `/goal done` handler: transition to done with lastVerdict="done" and lastReason="marked done by user", persist
+- [x] 6.6 Implement `/goal clear` handler: persist cleared terminal state via appendEntry THEN set runtime goal=null
+- [x] 6.7 Implement `/subgoal <text>` handler: append to subgoals array, persist, show confirmation
+- [x] 6.8 Implement `/subgoal list` handler: display numbered subgoals or "No subgoals."
+- [x] 6.9 Implement `/subgoal remove <n>` handler: validate 1-based index, remove, persist
+- [x] 6.10 Implement `/subgoal clear` handler: empty subgoals array, persist
+- [x] 6.11 Register both commands with `pi.registerCommand("goal", {...})` and `pi.registerCommand("subgoal", {...})` including `getArgumentCompletions`
+- [x] 6.12 Write tests for all command handlers: set/status/pause/stop/resume/done/clear, subgoal add/list/remove/clear, replacement confirmation flow
 
 ## 7. Message Rendering & Polish
 
