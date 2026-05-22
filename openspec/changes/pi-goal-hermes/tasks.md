@@ -71,11 +71,11 @@
 
 ## 7. Message Rendering & Polish
 
-- [ ] 7.1 Implement `emitGoalEvent(pi, eventType, state, options?)` helper for dispatching UI event messages with customType "pi-goal-hermes:event"
-- [ ] 7.2 Register `pi.registerMessageRenderer("pi-goal-hermes:event", ...)` with collapsed mode ("Goal continuing (ctrl+o to expand)") and expanded mode (full status + objective + usage)
-- [ ] 7.3 Register `pi.registerMessageRenderer("pi-goal-hermes:continuation", ...)` with collapsed continuation display
-- [ ] 7.4 Implement footer status line integration (if available): "Pursuing goal" / "Goal paused" / "Goal achieved"
-- [ ] 7.5 Verify all user-facing notifications use `ctx.ui.notify` with correct severity levels (info/warning)
+- [x] 7.1 Implement `emitGoalEvent(pi, eventType, state, options?)` helper for dispatching UI event messages with customType "pi-goal-hermes:event"
+- [x] 7.2 Register `pi.registerMessageRenderer("pi-goal-hermes:event", ...)` with collapsed mode ("Goal continuing (ctrl+o to expand)") and expanded mode (full status + objective + usage)
+- [x] 7.3 Register `pi.registerMessageRenderer("pi-goal-hermes:continuation", ...)` with collapsed continuation display
+- [x] 7.4 Implement footer status line integration (if available): "Pursuing goal" / "Goal paused" / "Goal achieved"
+- [x] 7.5 Verify all user-facing notifications use `ctx.ui.notify` with correct severity levels (info/warning)
 
 ## 8. Regression Tests & Edge Cases
 

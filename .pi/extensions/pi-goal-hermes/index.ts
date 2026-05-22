@@ -1,5 +1,6 @@
-import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, ExtensionCommandContext, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { type ContinuationState, queueContinuation } from "./continuation-prompt.ts";
+import { continuationRenderer, emitGoalEvent, goalEventRenderer } from "./event-renderer.ts";
 import { evaluateWithJudge } from "./goal-manager.ts";
 import { createPiLocalGoalState, latestStateFromSession, persist, type PiLocalGoalState } from "./goal-state.ts";
 
@@ -13,6 +14,28 @@ export default function piGoalHermes(pi: ExtensionAPI) {
 	let lastAssistantErrorMessage: string | null = null;
 	const continuationState: ContinuationState = { queued: false };
 
+	pi.registerMessageRenderer("pi-goal-hermes:event", goalEventRenderer);
+	pi.registerMessageRenderer("pi-goal-hermes:continuation", continuationRenderer);
+
+	function updateFooterStatus(ctx: ExtensionContext): void {
+		if (!goal || goal.status === "cleared") {
+			ctx.ui.setStatus("pi-goal-hermes", undefined);
+			return;
+		}
+		const theme = ctx.ui.theme;
+		switch (goal.status) {
+			case "active":
+				ctx.ui.setStatus("pi-goal-hermes", theme.fg("accent", "●") + theme.fg("dim", " Pursuing goal"));
+				break;
+			case "paused":
+				ctx.ui.setStatus("pi-goal-hermes", theme.fg("warning", "⏸") + theme.fg("dim", " Goal paused"));
+				break;
+			case "done":
+				ctx.ui.setStatus("pi-goal-hermes", theme.fg("success", "✓") + theme.fg("dim", " Goal achieved"));
+				break;
+		}
+	}
+
 	pi.on("session_start", (event, ctx) => {
 		goal = latestStateFromSession(ctx);
 		if (!goal) return;
@@ -23,6 +46,7 @@ export default function piGoalHermes(pi: ExtensionAPI) {
 			goal.updatedAt = Date.now();
 			persist(pi, ctx, goal);
 			ctx.ui.notify("Goal paused (session reload). Use /goal resume to continue.", "warning");
+			updateFooterStatus(ctx);
 			return;
 		}
 
@@ -31,6 +55,7 @@ export default function piGoalHermes(pi: ExtensionAPI) {
 		} else if (goal.status === "paused") {
 			ctx.ui.notify(`Goal paused: ${goal.pausedReason ?? "unknown reason"}. Use /goal resume.`, "info");
 		}
+		updateFooterStatus(ctx);
 	});
 
 	pi.on("turn_end", (event, _ctx) => {
@@ -58,7 +83,9 @@ export default function piGoalHermes(pi: ExtensionAPI) {
 			goal.pausedReason = "interrupted (Ctrl+C)";
 			goal.updatedAt = Date.now();
 			persist(pi, ctx, goal);
+			emitGoalEvent(pi, "goal-paused", goal);
 			ctx.ui.notify("Goal paused (interrupted).", "warning");
+			updateFooterStatus(ctx);
 			return;
 		}
 
@@ -71,7 +98,9 @@ export default function piGoalHermes(pi: ExtensionAPI) {
 				: `assistant response ${lastAssistantStopReason}`;
 			goal.updatedAt = Date.now();
 			persist(pi, ctx, goal);
+			emitGoalEvent(pi, "goal-paused", goal);
 			ctx.ui.notify(`Goal paused (${goal.pausedReason}).`, "warning");
+			updateFooterStatus(ctx);
 			return;
 		}
 
@@ -83,7 +112,14 @@ export default function piGoalHermes(pi: ExtensionAPI) {
 			ctx.ui.notify(result.statusMessage, "info");
 		}
 
-		if (result.shouldContinue) {
+		if (goal.status === "done") {
+			emitGoalEvent(pi, "goal-achieved", goal);
+			updateFooterStatus(ctx);
+		} else if (goal.status === "paused") {
+			emitGoalEvent(pi, "goal-paused", goal);
+			updateFooterStatus(ctx);
+		} else if (result.shouldContinue) {
+			emitGoalEvent(pi, "goal-continuing", goal);
 			queueContinuation(pi, ctx, goal, () => goal, continuationState);
 		}
 	});
@@ -190,7 +226,9 @@ export default function piGoalHermes(pi: ExtensionAPI) {
 		goal.pausedReason = variant === "stop" ? "user stop" : "user pause";
 		goal.updatedAt = Date.now();
 		persist(pi, ctx, goal);
+		emitGoalEvent(pi, "goal-paused", goal);
 		ctx.ui.notify(`Goal paused (${goal.pausedReason}).`, "info");
+		updateFooterStatus(ctx);
 	}
 
 	function handleGoalResume(pi: ExtensionAPI, ctx: ExtensionCommandContext) {
@@ -204,7 +242,9 @@ export default function piGoalHermes(pi: ExtensionAPI) {
 		goal.pausedReason = null;
 		goal.updatedAt = Date.now();
 		persist(pi, ctx, goal);
+		emitGoalEvent(pi, "goal-resumed", goal);
 		ctx.ui.notify(`Goal resumed: ${goal.goal}`, "info");
+		updateFooterStatus(ctx);
 		if (ctx.isIdle()) {
 			queueContinuation(pi, ctx, goal, () => goal, continuationState);
 		}
@@ -221,7 +261,9 @@ export default function piGoalHermes(pi: ExtensionAPI) {
 		goal.pausedReason = null;
 		goal.updatedAt = Date.now();
 		persist(pi, ctx, goal);
+		emitGoalEvent(pi, "goal-achieved", goal);
 		ctx.ui.notify("Goal marked done.", "info");
+		updateFooterStatus(ctx);
 	}
 
 	function handleGoalClear(pi: ExtensionAPI, ctx: ExtensionCommandContext) {
@@ -232,8 +274,10 @@ export default function piGoalHermes(pi: ExtensionAPI) {
 		goal.status = "cleared";
 		goal.updatedAt = Date.now();
 		persist(pi, ctx, goal);
+		emitGoalEvent(pi, "goal-cleared", goal);
 		goal = null;
 		ctx.ui.notify("Goal cleared.", "info");
+		updateFooterStatus(ctx);
 	}
 
 	function handleGoalSet(pi: ExtensionAPI, ctx: ExtensionCommandContext, text: string) {
@@ -242,7 +286,9 @@ export default function piGoalHermes(pi: ExtensionAPI) {
 		}
 		goal = createPiLocalGoalState(text);
 		persist(pi, ctx, goal);
+		emitGoalEvent(pi, "goal-set", goal);
 		ctx.ui.notify(`Goal set: ${text}`, "info");
+		updateFooterStatus(ctx);
 		if (ctx.isIdle()) {
 			queueContinuation(pi, ctx, goal, () => goal, continuationState);
 		}

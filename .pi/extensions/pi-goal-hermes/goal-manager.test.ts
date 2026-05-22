@@ -492,6 +492,7 @@ describe("piGoalHermes event handler integration", () => {
 				(handlers as Record<string, unknown>)[event] = handler;
 			},
 			registerCommand: vi.fn(),
+			registerMessageRenderer: vi.fn(),
 			appendEntry,
 			sendMessage,
 		} as unknown as ExtensionAPI;
@@ -510,7 +511,11 @@ describe("piGoalHermes event handler integration", () => {
 					getBranch: () => entries,
 					getEntries: () => entries,
 				},
-				ui: { notify },
+				ui: {
+					notify,
+					setStatus: vi.fn(),
+					theme: { fg: (_color: string, text: string) => text, bg: (_color: string, text: string) => text },
+				},
 				signal: overrides.signal,
 				hasPendingMessages: () => overrides.hasPendingMessages ?? false,
 				isIdle: () => overrides.isIdle ?? true,
@@ -721,7 +726,9 @@ describe("piGoalHermes event handler integration", () => {
 
 			expect(notify).toHaveBeenCalledWith("Goal achieved", "info");
 			vi.runAllTimers();
-			expect(sendMessage).not.toHaveBeenCalled();
+			expect(sendMessage).not.toHaveBeenCalledWith(
+				expect.objectContaining({ customType: "pi-goal-hermes:continuation" }),
+			);
 		});
 
 		it("pauses on signal.aborted (user interrupt)", async () => {
@@ -752,7 +759,9 @@ describe("piGoalHermes event handler integration", () => {
 					goal: expect.objectContaining({ status: "paused", pausedReason: "interrupted (Ctrl+C)" }),
 				}),
 			);
-			expect(sendMessage).not.toHaveBeenCalled();
+			expect(sendMessage).not.toHaveBeenCalledWith(
+				expect.objectContaining({ customType: "pi-goal-hermes:continuation" }),
+			);
 		});
 
 		it("skips evaluation when pending messages exist", async () => {
@@ -889,7 +898,9 @@ describe("piGoalHermes event handler integration", () => {
 			);
 
 			vi.runAllTimers();
-			expect(sendMessage).not.toHaveBeenCalled();
+			expect(sendMessage).not.toHaveBeenCalledWith(
+				expect.objectContaining({ customType: "pi-goal-hermes:continuation" }),
+			);
 			expect(appendEntry).toHaveBeenCalledWith(
 				GOAL_CUSTOM_TYPE,
 				expect.objectContaining({
@@ -924,7 +935,9 @@ describe("piGoalHermes event handler integration", () => {
 			);
 
 			vi.runAllTimers();
-			expect(sendMessage).not.toHaveBeenCalled();
+			expect(sendMessage).not.toHaveBeenCalledWith(
+				expect.objectContaining({ customType: "pi-goal-hermes:continuation" }),
+			);
 			expect(appendEntry).toHaveBeenCalledWith(
 				GOAL_CUSTOM_TYPE,
 				expect.objectContaining({
@@ -967,6 +980,7 @@ describe("piGoalHermes event handler integration", () => {
 					(handlerMap as Record<string, unknown>)[event] = handler;
 				},
 				registerCommand: mockRegisterCommand,
+				registerMessageRenderer: vi.fn(),
 				appendEntry: mockAppendEntry,
 				sendMessage: mockSendMessage,
 			} as unknown as ExtensionAPI;
@@ -990,7 +1004,11 @@ describe("piGoalHermes event handler integration", () => {
 						getBranch: () => entries,
 						getEntries: () => entries,
 					},
-					ui: { notify: mockNotify },
+					ui: {
+						notify: mockNotify,
+						setStatus: vi.fn(),
+						theme: { fg: (_color: string, text: string) => text, bg: (_color: string, text: string) => text },
+					},
 					signal: overrides.signal,
 					hasPendingMessages: () => overrides.hasPendingMessages ?? false,
 					isIdle: () => overrides.isIdle ?? true,
