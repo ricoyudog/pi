@@ -1,7 +1,9 @@
-import type { ExtensionAPI, ExtensionContext, SessionEntry } from "@earendil-works/pi-coding-agent";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import type { AgentEndEvent, ExtensionAPI, ExtensionContext, ExtensionHandler, SessionEntry, SessionStartEvent, TurnEndEvent } from "@earendil-works/pi-coding-agent";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { type ContinuationState, queueContinuation } from "./continuation-prompt.ts";
 import { evaluateWithJudge } from "./goal-manager.ts";
 import { GOAL_CUSTOM_TYPE, createPiLocalGoalState, latestStateFromSession, type PiLocalGoalState } from "./goal-state.ts";
+import piGoalHermes from "./index.ts";
 import { JudgeService } from "./judge-service.ts";
 
 function createSessionContext(entries: SessionEntry[], branchThrows = false): ExtensionContext {
@@ -290,5 +292,659 @@ describe("pi-goal-hermes core evaluation logic", () => {
 			lastReason: "no judge model available",
 		});
 		expect(appendEntry).toHaveBeenCalledWith(GOAL_CUSTOM_TYPE, { goal: state });
+	});
+});
+
+describe("queueContinuation", () => {
+	beforeEach(() => {
+		vi.useFakeTimers();
+	});
+
+	afterEach(() => {
+		vi.useRealTimers();
+	});
+
+	function createQueueContext(overrides: {
+		isIdle?: boolean;
+		hasPendingMessages?: boolean;
+	} = {}): ExtensionContext {
+		return {
+			isIdle: () => overrides.isIdle ?? true,
+			hasPendingMessages: () => overrides.hasPendingMessages ?? false,
+			signal: undefined,
+		} as unknown as ExtensionContext;
+	}
+
+	function createQueuePi(): { pi: ExtensionAPI; sendMessage: ReturnType<typeof vi.fn> } {
+		const sendMessage = vi.fn();
+		return {
+			pi: { sendMessage } as unknown as ExtensionAPI,
+			sendMessage,
+		};
+	}
+
+	it("sends continuation message when agent is idle", () => {
+		const state = createPiLocalGoalState("build the feature");
+		const { pi, sendMessage } = createQueuePi();
+		const ctx = createQueueContext({ isIdle: true });
+		const continuationState: ContinuationState = { queued: false };
+		const getGoal = () => state;
+
+		queueContinuation(pi, ctx, state, getGoal, continuationState);
+		vi.runAllTimers();
+
+		expect(sendMessage).toHaveBeenCalledWith(
+			{
+				customType: "pi-goal-hermes:continuation",
+				content: [{ type: "text", text: `Continue working toward the goal:\n${state.goal}` }],
+				display: true,
+				details: { goalId: state.id },
+			},
+			{ deliverAs: "followUp", triggerTurn: true },
+		);
+		expect(continuationState.queued).toBe(false);
+	});
+
+	it("prevents duplicate continuation when already queued", () => {
+		const state = createPiLocalGoalState("build the feature");
+		const { pi, sendMessage } = createQueuePi();
+		const ctx = createQueueContext({ isIdle: true });
+		const continuationState: ContinuationState = { queued: false };
+		const getGoal = () => state;
+
+		queueContinuation(pi, ctx, state, getGoal, continuationState);
+		queueContinuation(pi, ctx, state, getGoal, continuationState);
+		vi.runAllTimers();
+
+		expect(sendMessage).toHaveBeenCalledTimes(1);
+	});
+
+	it("abandons when goal is null (cleared)", () => {
+		const state = createPiLocalGoalState("build the feature");
+		const { pi, sendMessage } = createQueuePi();
+		const ctx = createQueueContext({ isIdle: true });
+		const continuationState: ContinuationState = { queued: false };
+		const getGoal = () => null;
+
+		queueContinuation(pi, ctx, state, getGoal, continuationState);
+		vi.runAllTimers();
+
+		expect(sendMessage).not.toHaveBeenCalled();
+		expect(continuationState.queued).toBe(false);
+	});
+
+	it("abandons when goal id has changed (new goal set)", () => {
+		const state = createPiLocalGoalState("build the feature");
+		const newGoal = createPiLocalGoalState("different goal");
+		const { pi, sendMessage } = createQueuePi();
+		const ctx = createQueueContext({ isIdle: true });
+		const continuationState: ContinuationState = { queued: false };
+		const getGoal = () => newGoal;
+
+		queueContinuation(pi, ctx, state, getGoal, continuationState);
+		vi.runAllTimers();
+
+		expect(sendMessage).not.toHaveBeenCalled();
+		expect(continuationState.queued).toBe(false);
+	});
+
+	it("abandons when there are pending user messages", () => {
+		const state = createPiLocalGoalState("build the feature");
+		const { pi, sendMessage } = createQueuePi();
+		const ctx = createQueueContext({ isIdle: true, hasPendingMessages: true });
+		const continuationState: ContinuationState = { queued: false };
+		const getGoal = () => state;
+
+		queueContinuation(pi, ctx, state, getGoal, continuationState);
+		vi.runAllTimers();
+
+		expect(sendMessage).not.toHaveBeenCalled();
+		expect(continuationState.queued).toBe(false);
+	});
+
+	it("abandons when goal status is no longer active", () => {
+		const state = createPiLocalGoalState("build the feature");
+		const pausedGoal = { ...state, status: "paused" as const };
+		const { pi, sendMessage } = createQueuePi();
+		const ctx = createQueueContext({ isIdle: true });
+		const continuationState: ContinuationState = { queued: false };
+		const getGoal = () => pausedGoal;
+
+		queueContinuation(pi, ctx, state, getGoal, continuationState);
+		vi.runAllTimers();
+
+		expect(sendMessage).not.toHaveBeenCalled();
+		expect(continuationState.queued).toBe(false);
+	});
+
+	it("retries when not idle and eventually sends on idle", () => {
+		const state = createPiLocalGoalState("build the feature");
+		const { pi, sendMessage } = createQueuePi();
+		let idleCallCount = 0;
+		const ctx = {
+			isIdle: () => {
+				idleCallCount++;
+				return idleCallCount >= 3;
+			},
+			hasPendingMessages: () => false,
+			signal: undefined,
+		} as unknown as ExtensionContext;
+		const continuationState: ContinuationState = { queued: false };
+		const getGoal = () => state;
+
+		queueContinuation(pi, ctx, state, getGoal, continuationState);
+		vi.runAllTimers();
+
+		expect(sendMessage).toHaveBeenCalledTimes(1);
+		expect(idleCallCount).toBe(3);
+		expect(continuationState.queued).toBe(false);
+	});
+
+	it("abandons after max retries exhausted without reaching idle", () => {
+		const state = createPiLocalGoalState("build the feature");
+		const { pi, sendMessage } = createQueuePi();
+		const ctx = createQueueContext({ isIdle: false });
+		const continuationState: ContinuationState = { queued: false };
+		const getGoal = () => state;
+
+		queueContinuation(pi, ctx, state, getGoal, continuationState);
+		vi.runAllTimers();
+
+		expect(sendMessage).not.toHaveBeenCalled();
+		expect(continuationState.queued).toBe(false);
+	});
+
+	it("resets queued flag after successful send allowing future continuations", () => {
+		const state = createPiLocalGoalState("build the feature");
+		const { pi, sendMessage } = createQueuePi();
+		const ctx = createQueueContext({ isIdle: true });
+		const continuationState: ContinuationState = { queued: false };
+		const getGoal = () => state;
+
+		queueContinuation(pi, ctx, state, getGoal, continuationState);
+		vi.runAllTimers();
+
+		expect(sendMessage).toHaveBeenCalledTimes(1);
+		expect(continuationState.queued).toBe(false);
+
+		queueContinuation(pi, ctx, state, getGoal, continuationState);
+		vi.runAllTimers();
+
+		expect(sendMessage).toHaveBeenCalledTimes(2);
+	});
+});
+
+describe("piGoalHermes event handler integration", () => {
+	type HandlerMap = {
+		session_start: ExtensionHandler<SessionStartEvent>;
+		turn_end: ExtensionHandler<TurnEndEvent>;
+		agent_end: ExtensionHandler<AgentEndEvent>;
+	};
+
+	function setupExtension(sessionEntries: SessionEntry[] = []) {
+		const handlers: Partial<HandlerMap> = {};
+		const appendEntry = vi.fn();
+		const sendMessage = vi.fn();
+		const notify = vi.fn();
+
+		const pi = {
+			on: (event: string, handler: unknown) => {
+				(handlers as Record<string, unknown>)[event] = handler;
+			},
+			registerCommand: vi.fn(),
+			appendEntry,
+			sendMessage,
+		} as unknown as ExtensionAPI;
+
+		piGoalHermes(pi);
+
+		function createCtx(overrides: {
+			signal?: { aborted: boolean };
+			hasPendingMessages?: boolean;
+			isIdle?: boolean;
+			entries?: SessionEntry[];
+		} = {}): ExtensionContext {
+			const entries = overrides.entries ?? sessionEntries;
+			return {
+				sessionManager: {
+					getBranch: () => entries,
+					getEntries: () => entries,
+				},
+				ui: { notify },
+				signal: overrides.signal,
+				hasPendingMessages: () => overrides.hasPendingMessages ?? false,
+				isIdle: () => overrides.isIdle ?? true,
+			} as unknown as ExtensionContext;
+		}
+
+		return { handlers: handlers as HandlerMap, appendEntry, sendMessage, notify, createCtx };
+	}
+
+	function makeGoalEntry(goal: PiLocalGoalState): SessionEntry {
+		return {
+			type: "custom",
+			customType: GOAL_CUSTOM_TYPE,
+			data: { goal },
+			id: goal.id,
+			parentId: null,
+			timestamp: new Date().toISOString(),
+		};
+	}
+
+	function makeAssistantMessage(text: string, stopReason = "stop", errorMessage?: string) {
+		return {
+			role: "assistant",
+			content: [{ type: "text", text }],
+			stopReason,
+			errorMessage,
+		};
+	}
+
+	describe("session_start handler", () => {
+		it("restores active goal and notifies user", () => {
+			const goal = createPiLocalGoalState("finish the task");
+			const entries = [makeGoalEntry(goal)];
+			const { handlers, notify, createCtx } = setupExtension(entries);
+
+			handlers.session_start({ type: "session_start", reason: "startup" }, createCtx());
+
+			expect(notify).toHaveBeenCalledWith(
+				expect.stringContaining("Goal restored: finish the task"),
+				"info",
+			);
+		});
+
+		it("pauses active goal on reload and persists", () => {
+			const goal = createPiLocalGoalState("finish the task");
+			const entries = [makeGoalEntry(goal)];
+			const { handlers, notify, appendEntry, createCtx } = setupExtension(entries);
+
+			handlers.session_start({ type: "session_start", reason: "reload" }, createCtx());
+
+			expect(notify).toHaveBeenCalledWith(
+				expect.stringContaining("Goal paused (session reload)"),
+				"warning",
+			);
+			expect(appendEntry).toHaveBeenCalledWith(
+				GOAL_CUSTOM_TYPE,
+				expect.objectContaining({ goal: expect.objectContaining({ status: "paused", pausedReason: "reload" }) }),
+			);
+		});
+
+		it("notifies about paused goal with reason", () => {
+			const goal = { ...createPiLocalGoalState("finish the task"), status: "paused" as const, pausedReason: "interrupted (Ctrl+C)" };
+			const entries = [makeGoalEntry(goal)];
+			const { handlers, notify, createCtx } = setupExtension(entries);
+
+			handlers.session_start({ type: "session_start", reason: "resume" }, createCtx());
+
+			expect(notify).toHaveBeenCalledWith(
+				expect.stringContaining("interrupted (Ctrl+C)"),
+				"info",
+			);
+		});
+
+		it("does nothing when no goal exists in session", () => {
+			const { handlers, notify, createCtx } = setupExtension([]);
+
+			handlers.session_start({ type: "session_start", reason: "startup" }, createCtx());
+
+			expect(notify).not.toHaveBeenCalled();
+		});
+	});
+
+	describe("turn_end handler", () => {
+		it("captures assistant text content for later use by agent_end", async () => {
+			const goal = createPiLocalGoalState("ship it");
+			const entries = [makeGoalEntry(goal)];
+			const { handlers, createCtx, sendMessage } = setupExtension(entries);
+
+			handlers.session_start({ type: "session_start", reason: "startup" }, createCtx());
+
+			const msg = makeAssistantMessage("I deployed the code.");
+			handlers.turn_end(
+				{ type: "turn_end", turnIndex: 0, message: msg, toolResults: [] } as unknown as TurnEndEvent,
+				createCtx(),
+			);
+
+			vi.spyOn(JudgeService.prototype, "evaluate").mockResolvedValue({
+				verdict: "done",
+				done: true,
+				reason: "deployed",
+				parseFailed: false,
+			});
+
+			await handlers.agent_end(
+				{ type: "agent_end", messages: [] } as unknown as AgentEndEvent,
+				createCtx(),
+			);
+
+			expect(JudgeService.prototype.evaluate).toHaveBeenCalledWith(
+				expect.objectContaining({ response: "I deployed the code." }),
+				expect.anything(),
+			);
+		});
+
+		it("ignores non-assistant messages", () => {
+			const goal = createPiLocalGoalState("ship it");
+			const entries = [makeGoalEntry(goal)];
+			const { handlers, createCtx } = setupExtension(entries);
+
+			handlers.session_start({ type: "session_start", reason: "startup" }, createCtx());
+
+			const userMsg = { type: "user", content: [{ type: "text", text: "hello" }] };
+			handlers.turn_end(
+				{ type: "turn_end", turnIndex: 0, message: userMsg, toolResults: [] } as unknown as TurnEndEvent,
+				createCtx(),
+			);
+		});
+
+		it("skips when no active goal", () => {
+			const { handlers, createCtx } = setupExtension([]);
+
+			const msg = makeAssistantMessage("hello");
+			handlers.turn_end(
+				{ type: "turn_end", turnIndex: 0, message: msg, toolResults: [] } as unknown as TurnEndEvent,
+				createCtx(),
+			);
+		});
+	});
+
+	describe("agent_end handler", () => {
+		beforeEach(() => {
+			vi.useFakeTimers();
+		});
+
+		afterEach(() => {
+			vi.useRealTimers();
+			vi.restoreAllMocks();
+		});
+
+		it("evaluates with judge and queues continuation on shouldContinue", async () => {
+			const goal = createPiLocalGoalState("build feature");
+			const entries = [makeGoalEntry(goal)];
+			const { handlers, createCtx, sendMessage, notify } = setupExtension(entries);
+
+			handlers.session_start({ type: "session_start", reason: "startup" }, createCtx());
+
+			const msg = makeAssistantMessage("Working on it.");
+			handlers.turn_end(
+				{ type: "turn_end", turnIndex: 0, message: msg, toolResults: [] } as unknown as TurnEndEvent,
+				createCtx(),
+			);
+
+			vi.spyOn(JudgeService.prototype, "evaluate").mockResolvedValue({
+				verdict: "continue",
+				done: false,
+				reason: "more work needed",
+				parseFailed: false,
+			});
+
+			await handlers.agent_end(
+				{ type: "agent_end", messages: [] } as unknown as AgentEndEvent,
+				createCtx({ isIdle: true }),
+			);
+
+			expect(notify).toHaveBeenCalledWith(expect.any(String), "info");
+
+			vi.runAllTimers();
+			expect(sendMessage).toHaveBeenCalledWith(
+				expect.objectContaining({ customType: "pi-goal-hermes:continuation" }),
+				expect.objectContaining({ deliverAs: "followUp", triggerTurn: true }),
+			);
+		});
+
+		it("evaluates with judge and does not queue on goal done", async () => {
+			const goal = createPiLocalGoalState("build feature");
+			const entries = [makeGoalEntry(goal)];
+			const { handlers, createCtx, sendMessage, notify } = setupExtension(entries);
+
+			handlers.session_start({ type: "session_start", reason: "startup" }, createCtx());
+
+			const msg = makeAssistantMessage("Done, everything is deployed.");
+			handlers.turn_end(
+				{ type: "turn_end", turnIndex: 0, message: msg, toolResults: [] } as unknown as TurnEndEvent,
+				createCtx(),
+			);
+
+			vi.spyOn(JudgeService.prototype, "evaluate").mockResolvedValue({
+				verdict: "done",
+				done: true,
+				reason: "goal achieved",
+				parseFailed: false,
+			});
+
+			await handlers.agent_end(
+				{ type: "agent_end", messages: [] } as unknown as AgentEndEvent,
+				createCtx({ isIdle: true }),
+			);
+
+			expect(notify).toHaveBeenCalledWith("Goal achieved", "info");
+			vi.runAllTimers();
+			expect(sendMessage).not.toHaveBeenCalled();
+		});
+
+		it("pauses on signal.aborted (user interrupt)", async () => {
+			const goal = createPiLocalGoalState("build feature");
+			const entries = [makeGoalEntry(goal)];
+			const { handlers, createCtx, appendEntry, notify, sendMessage } = setupExtension(entries);
+
+			handlers.session_start({ type: "session_start", reason: "startup" }, createCtx());
+
+			const msg = makeAssistantMessage("Working...");
+			handlers.turn_end(
+				{ type: "turn_end", turnIndex: 0, message: msg, toolResults: [] } as unknown as TurnEndEvent,
+				createCtx(),
+			);
+
+			await handlers.agent_end(
+				{ type: "agent_end", messages: [] } as unknown as AgentEndEvent,
+				createCtx({ signal: { aborted: true } }),
+			);
+
+			expect(notify).toHaveBeenCalledWith(
+				expect.stringContaining("Goal paused (interrupted)"),
+				"warning",
+			);
+			expect(appendEntry).toHaveBeenCalledWith(
+				GOAL_CUSTOM_TYPE,
+				expect.objectContaining({
+					goal: expect.objectContaining({ status: "paused", pausedReason: "interrupted (Ctrl+C)" }),
+				}),
+			);
+			expect(sendMessage).not.toHaveBeenCalled();
+		});
+
+		it("skips evaluation when pending messages exist", async () => {
+			const goal = createPiLocalGoalState("build feature");
+			const entries = [makeGoalEntry(goal)];
+			const { handlers, createCtx, sendMessage } = setupExtension(entries);
+
+			handlers.session_start({ type: "session_start", reason: "startup" }, createCtx());
+
+			const msg = makeAssistantMessage("Working...");
+			handlers.turn_end(
+				{ type: "turn_end", turnIndex: 0, message: msg, toolResults: [] } as unknown as TurnEndEvent,
+				createCtx(),
+			);
+
+			const evaluateSpy = vi.spyOn(JudgeService.prototype, "evaluate");
+
+			await handlers.agent_end(
+				{ type: "agent_end", messages: [] } as unknown as AgentEndEvent,
+				createCtx({ hasPendingMessages: true }),
+			);
+
+			expect(evaluateSpy).not.toHaveBeenCalled();
+			expect(sendMessage).not.toHaveBeenCalled();
+		});
+
+		it("pauses on error stopReason with errorMessage", async () => {
+			const goal = createPiLocalGoalState("build feature");
+			const entries = [makeGoalEntry(goal)];
+			const { handlers, createCtx, appendEntry, notify } = setupExtension(entries);
+
+			handlers.session_start({ type: "session_start", reason: "startup" }, createCtx());
+
+			const msg = makeAssistantMessage("Oops", "error", "rate limit exceeded");
+			handlers.turn_end(
+				{ type: "turn_end", turnIndex: 0, message: msg, toolResults: [] } as unknown as TurnEndEvent,
+				createCtx(),
+			);
+
+			await handlers.agent_end(
+				{ type: "agent_end", messages: [] } as unknown as AgentEndEvent,
+				createCtx(),
+			);
+
+			expect(notify).toHaveBeenCalledWith(
+				expect.stringContaining("error: rate limit exceeded"),
+				"warning",
+			);
+			expect(appendEntry).toHaveBeenCalledWith(
+				GOAL_CUSTOM_TYPE,
+				expect.objectContaining({
+					goal: expect.objectContaining({ status: "paused", pausedReason: "error: rate limit exceeded" }),
+				}),
+			);
+		});
+
+		it("pauses on aborted stopReason without errorMessage", async () => {
+			const goal = createPiLocalGoalState("build feature");
+			const entries = [makeGoalEntry(goal)];
+			const { handlers, createCtx, appendEntry, notify } = setupExtension(entries);
+
+			handlers.session_start({ type: "session_start", reason: "startup" }, createCtx());
+
+			const msg = makeAssistantMessage("...", "aborted");
+			handlers.turn_end(
+				{ type: "turn_end", turnIndex: 0, message: msg, toolResults: [] } as unknown as TurnEndEvent,
+				createCtx(),
+			);
+
+			await handlers.agent_end(
+				{ type: "agent_end", messages: [] } as unknown as AgentEndEvent,
+				createCtx(),
+			);
+
+			expect(notify).toHaveBeenCalledWith(
+				expect.stringContaining("assistant response aborted"),
+				"warning",
+			);
+			expect(appendEntry).toHaveBeenCalledWith(
+				GOAL_CUSTOM_TYPE,
+				expect.objectContaining({
+					goal: expect.objectContaining({ status: "paused", pausedReason: "assistant response aborted" }),
+				}),
+			);
+		});
+
+		it("skips evaluation when assistant content is empty", async () => {
+			const goal = createPiLocalGoalState("build feature");
+			const entries = [makeGoalEntry(goal)];
+			const { handlers, createCtx, sendMessage } = setupExtension(entries);
+
+			handlers.session_start({ type: "session_start", reason: "startup" }, createCtx());
+
+			const msg = makeAssistantMessage("");
+			handlers.turn_end(
+				{ type: "turn_end", turnIndex: 0, message: msg, toolResults: [] } as unknown as TurnEndEvent,
+				createCtx(),
+			);
+
+			const evaluateSpy = vi.spyOn(JudgeService.prototype, "evaluate");
+
+			await handlers.agent_end(
+				{ type: "agent_end", messages: [] } as unknown as AgentEndEvent,
+				createCtx(),
+			);
+
+			expect(evaluateSpy).not.toHaveBeenCalled();
+			expect(sendMessage).not.toHaveBeenCalled();
+		});
+
+		it("pauses after maxTurns exhaustion via evaluateWithJudge", async () => {
+			const goal = { ...createPiLocalGoalState("build feature"), turnsUsed: 19, maxTurns: 20 };
+			const entries = [makeGoalEntry(goal)];
+			const { handlers, createCtx, sendMessage, appendEntry } = setupExtension(entries);
+
+			handlers.session_start({ type: "session_start", reason: "startup" }, createCtx());
+
+			const msg = makeAssistantMessage("Still going...");
+			handlers.turn_end(
+				{ type: "turn_end", turnIndex: 0, message: msg, toolResults: [] } as unknown as TurnEndEvent,
+				createCtx(),
+			);
+
+			vi.spyOn(JudgeService.prototype, "evaluate").mockResolvedValue({
+				verdict: "continue",
+				done: false,
+				reason: "not done yet",
+				parseFailed: false,
+			});
+
+			await handlers.agent_end(
+				{ type: "agent_end", messages: [] } as unknown as AgentEndEvent,
+				createCtx({ isIdle: true }),
+			);
+
+			vi.runAllTimers();
+			expect(sendMessage).not.toHaveBeenCalled();
+			expect(appendEntry).toHaveBeenCalledWith(
+				GOAL_CUSTOM_TYPE,
+				expect.objectContaining({
+					goal: expect.objectContaining({ status: "paused", pausedReason: "maxTurns budget exhausted" }),
+				}),
+			);
+		});
+
+		it("pauses after consecutive parse failures reach threshold", async () => {
+			const goal = { ...createPiLocalGoalState("build feature"), consecutiveParseFailures: 2 };
+			const entries = [makeGoalEntry(goal)];
+			const { handlers, createCtx, sendMessage, appendEntry } = setupExtension(entries);
+
+			handlers.session_start({ type: "session_start", reason: "startup" }, createCtx());
+
+			const msg = makeAssistantMessage("Working...");
+			handlers.turn_end(
+				{ type: "turn_end", turnIndex: 0, message: msg, toolResults: [] } as unknown as TurnEndEvent,
+				createCtx(),
+			);
+
+			vi.spyOn(JudgeService.prototype, "evaluate").mockResolvedValue({
+				verdict: "continue",
+				done: false,
+				reason: "judge reply was not JSON: garbage",
+				parseFailed: true,
+			});
+
+			await handlers.agent_end(
+				{ type: "agent_end", messages: [] } as unknown as AgentEndEvent,
+				createCtx({ isIdle: true }),
+			);
+
+			vi.runAllTimers();
+			expect(sendMessage).not.toHaveBeenCalled();
+			expect(appendEntry).toHaveBeenCalledWith(
+				GOAL_CUSTOM_TYPE,
+				expect.objectContaining({
+					goal: expect.objectContaining({ status: "paused", pausedReason: "judge output was unparseable 3 times in a row" }),
+				}),
+			);
+		});
+
+		it("does nothing when no goal is active", async () => {
+			const { handlers, createCtx, sendMessage } = setupExtension([]);
+
+			const evaluateSpy = vi.spyOn(JudgeService.prototype, "evaluate");
+
+			await handlers.agent_end(
+				{ type: "agent_end", messages: [] } as unknown as AgentEndEvent,
+				createCtx(),
+			);
+
+			expect(evaluateSpy).not.toHaveBeenCalled();
+			expect(sendMessage).not.toHaveBeenCalled();
+		});
 	});
 });

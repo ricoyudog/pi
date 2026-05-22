@@ -38,21 +38,21 @@
 
 ## 4. Continuation Prompt & Queue Mechanism
 
-- [ ] 4.1 Implement `makeContinuationPrompt(state)` in `continuation-prompt.ts`: basic template (no subgoals) matching Hermes verbatim
-- [ ] 4.2 Implement subgoals variant of `makeContinuationPrompt`: numbered criteria + "Continue working toward the goal AND all additional criteria" instruction
-- [ ] 4.3 Implement `queueContinuation(pi, ctx, state)` with: `continuationQueued` dedup flag, idle macrotask via `setTimeout(..., 0)`, stale guards (goal null / id mismatch / status != active / hasPendingMessages), `ctx.isIdle()` polling with max 10 retries
-- [ ] 4.4 Implement the `pi.sendMessage` call inside queueContinuation with correct payload: `{ customType: "pi-goal-hermes:continuation", content: [{type:"text", text: prompt}], display: true, details: { goalId } }` and options `{ deliverAs: "followUp", triggerTurn: true }`
-- [ ] 4.5 Implement `continuationQueued` flag reset on both successful send and all abandon paths (stale, exhausted retries)
-- [ ] 4.6 Write unit tests for queueContinuation: dedup prevention, stale-goal abandon, stale-id abandon, pending-messages abandon, retry exhaustion, successful send
+- [x] 4.1 Implement `makeContinuationPrompt(state)` in `continuation-prompt.ts`: basic template (no subgoals) matching Hermes verbatim
+- [x] 4.2 Implement subgoals variant of `makeContinuationPrompt`: numbered criteria + "Continue working toward the goal AND all additional criteria" instruction
+- [x] 4.3 Implement `queueContinuation(pi, ctx, state)` with: `continuationQueued` dedup flag, idle macrotask via `setTimeout(..., 0)`, stale guards (goal null / id mismatch / status != active / hasPendingMessages), `ctx.isIdle()` polling with max 10 retries
+- [x] 4.4 Implement the `pi.sendMessage` call inside queueContinuation with correct payload: `{ customType: "pi-goal-hermes:continuation", content: [{type:"text", text: prompt}], display: true, details: { goalId } }` and options `{ deliverAs: "followUp", triggerTurn: true }`
+- [x] 4.5 Implement `continuationQueued` flag reset on both successful send and all abandon paths (stale, exhausted retries)
+- [x] 4.6 Write unit tests for queueContinuation: dedup prevention, stale-goal abandon, stale-id abandon, pending-messages abandon, retry exhaustion, successful send
 
 ## 5. Event Handlers Integration
 
-- [ ] 5.1 Implement `session_start` handler: call `latestStateFromSession(ctx)`, restore goal state, handle reload auto-pause (reason="reload"), notify user of restored/paused state
-- [ ] 5.2 Implement `turn_end` handler: guard on `goal?.status === "active"`, extract text content from event.message, store lastAssistantContent/lastAssistantStopReason/lastAssistantErrorMessage
-- [ ] 5.3 Implement `agent_end` handler entry guards: check goal active, check ctx.signal?.aborted (-> pause), check ctx.hasPendingMessages() (-> skip), check error/aborted stopReason (-> pause), check empty response (-> skip)
-- [ ] 5.4 Implement `agent_end` core flow: call `evaluateWithJudge`, display statusMessage, if shouldContinue call `queueContinuation`
-- [ ] 5.5 Wire all handlers in `index.ts` entry point: `pi.on("session_start", ...)`, `pi.on("turn_end", ...)`, `pi.on("agent_end", ...)`
-- [ ] 5.6 Write integration tests: full goal loop with mock judge (agent_end -> idle macrotask -> next turn trigger), user interruption flow, maxTurns exhaustion, consecutive parse failures -> pause
+- [x] 5.1 Implement `session_start` handler: call `latestStateFromSession(ctx)`, restore goal state, handle reload auto-pause (reason="reload"), notify user of restored/paused state
+- [x] 5.2 Implement `turn_end` handler: guard on `goal?.status === "active"`, extract text content from event.message, store lastAssistantContent/lastAssistantStopReason/lastAssistantErrorMessage
+- [x] 5.3 Implement `agent_end` handler entry guards: check goal active, check ctx.signal?.aborted (-> pause), check ctx.hasPendingMessages() (-> skip), check error/aborted stopReason (-> pause), check empty response (-> skip)
+- [x] 5.4 Implement `agent_end` core flow: call `evaluateWithJudge`, display statusMessage, if shouldContinue call `queueContinuation`
+- [x] 5.5 Wire all handlers in `index.ts` entry point: `pi.on("session_start", ...)`, `pi.on("turn_end", ...)`, `pi.on("agent_end", ...)`
+- [x] 5.6 Write integration tests: full goal loop with mock judge (agent_end -> idle macrotask -> next turn trigger), user interruption flow, maxTurns exhaustion, consecutive parse failures -> pause
 
 ## 6. Slash Commands
 
