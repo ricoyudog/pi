@@ -1331,11 +1331,498 @@ describe("piGoalHermes event handler integration", () => {
 				);
 			});
 
-			it("filters subgoal argument completions by prefix", () => {
-				const { commands } = setupCommands([]);
-				const completions = commands.subgoal.getArgumentCompletions!("r");
-				expect(completions).toEqual([expect.objectContaining({ value: "remove" })]);
+		it("filters subgoal argument completions by prefix", () => {
+			const { commands } = setupCommands([]);
+			const completions = commands.subgoal.getArgumentCompletions!("r");
+			expect(completions).toEqual([expect.objectContaining({ value: "remove" })]);
+		});
+		});
+	});
+});
+
+describe("Regression tests", () => {
+	type HandlerMap = {
+		session_start: ExtensionHandler<SessionStartEvent>;
+		turn_end: ExtensionHandler<TurnEndEvent>;
+		agent_end: ExtensionHandler<AgentEndEvent>;
+	};
+
+	function setup(sessionEntries: SessionEntry[] = []) {
+		const handlers: Partial<HandlerMap> = {};
+		const appendEntry = vi.fn();
+		const sendMessage = vi.fn();
+		const notify = vi.fn();
+		const registerCommand = vi.fn();
+
+		const pi = {
+			on: (event: string, handler: unknown) => {
+				(handlers as Record<string, unknown>)[event] = handler;
+			},
+			registerCommand,
+			registerMessageRenderer: vi.fn(),
+			appendEntry,
+			sendMessage,
+		} as unknown as ExtensionAPI;
+
+		piGoalHermes(pi);
+
+		function createCtx(overrides: {
+			signal?: { aborted: boolean };
+			hasPendingMessages?: boolean;
+			isIdle?: boolean;
+			entries?: SessionEntry[];
+		} = {}): ExtensionContext {
+			const entries = overrides.entries ?? sessionEntries;
+			return {
+				sessionManager: {
+					getBranch: () => entries,
+					getEntries: () => entries,
+				},
+				ui: {
+					notify,
+					setStatus: vi.fn(),
+					theme: { fg: (_color: string, text: string) => text, bg: (_color: string, text: string) => text },
+				},
+				signal: overrides.signal,
+				hasPendingMessages: () => overrides.hasPendingMessages ?? false,
+				isIdle: () => overrides.isIdle ?? true,
+			} as unknown as ExtensionContext;
+		}
+
+		return { handlers: handlers as HandlerMap, appendEntry, sendMessage, notify, registerCommand, createCtx };
+	}
+
+	function goalEntry(goal: PiLocalGoalState): SessionEntry {
+		return {
+			type: "custom",
+			customType: GOAL_CUSTOM_TYPE,
+			data: { goal },
+			id: goal.id,
+			parentId: null,
+			timestamp: new Date().toISOString(),
+		};
+	}
+
+	function assistantMsg(text: string, stopReason = "stop", errorMessage?: string) {
+		return {
+			role: "assistant",
+			content: [{ type: "text", text }],
+			stopReason,
+			errorMessage,
+		};
+	}
+
+	describe("T01: agent_end judge=continue uses idle macrotask + ctx.isIdle() + triggerTurn:true", () => {
+		beforeEach(() => { vi.useFakeTimers(); });
+		afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks(); });
+
+		it("does not send continuation synchronously during agent_end, only after macrotask", async () => {
+			const goal = createPiLocalGoalState("build feature");
+			const entries = [goalEntry(goal)];
+			const { handlers, createCtx, sendMessage } = setup(entries);
+
+			handlers.session_start({ type: "session_start", reason: "startup" }, createCtx());
+			handlers.turn_end(
+				{ type: "turn_end", turnIndex: 0, message: assistantMsg("Working on it."), toolResults: [] } as unknown as TurnEndEvent,
+				createCtx(),
+			);
+
+			vi.spyOn(JudgeService.prototype, "evaluate").mockResolvedValue({
+				verdict: "continue",
+				done: false,
+				reason: "more work needed",
+				parseFailed: false,
+				preserveParseFailureCounter: false,
 			});
+
+			await handlers.agent_end(
+				{ type: "agent_end", messages: [] } as unknown as AgentEndEvent,
+				createCtx({ isIdle: true }),
+			);
+
+			expect(sendMessage).not.toHaveBeenCalledWith(
+				expect.objectContaining({ customType: "pi-goal-hermes:continuation" }),
+				expect.anything(),
+			);
+
+			vi.runAllTimers();
+			expect(sendMessage).toHaveBeenCalledWith(
+				expect.objectContaining({ customType: "pi-goal-hermes:continuation" }),
+				expect.objectContaining({ triggerTurn: true }),
+			);
+		});
+	});
+
+	describe("T02: tool-call chain multiple turn_end, judge only at agent_end", () => {
+		beforeEach(() => { vi.useFakeTimers(); });
+		afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks(); });
+
+		it("fires judge exactly once at agent_end with last turn_end content", async () => {
+			const goal = createPiLocalGoalState("build feature");
+			const entries = [goalEntry(goal)];
+			const { handlers, createCtx } = setup(entries);
+
+			handlers.session_start({ type: "session_start", reason: "startup" }, createCtx());
+
+			handlers.turn_end(
+				{ type: "turn_end", turnIndex: 0, message: assistantMsg("Step 1 output"), toolResults: [] } as unknown as TurnEndEvent,
+				createCtx(),
+			);
+			handlers.turn_end(
+				{ type: "turn_end", turnIndex: 1, message: assistantMsg("Step 2 output"), toolResults: [] } as unknown as TurnEndEvent,
+				createCtx(),
+			);
+			handlers.turn_end(
+				{ type: "turn_end", turnIndex: 2, message: assistantMsg("Final step output"), toolResults: [] } as unknown as TurnEndEvent,
+				createCtx(),
+			);
+
+			const evaluateSpy = vi.spyOn(JudgeService.prototype, "evaluate").mockResolvedValue({
+				verdict: "continue",
+				done: false,
+				reason: "keep going",
+				parseFailed: false,
+				preserveParseFailureCounter: false,
+			});
+
+			await handlers.agent_end(
+				{ type: "agent_end", messages: [] } as unknown as AgentEndEvent,
+				createCtx({ isIdle: true }),
+			);
+
+			expect(evaluateSpy).toHaveBeenCalledTimes(1);
+			expect(evaluateSpy).toHaveBeenCalledWith(
+				expect.objectContaining({ response: "Final step output" }),
+				expect.anything(),
+			);
+		});
+	});
+
+	describe("T03: custom continuation message payload matches followUp contract", () => {
+		beforeEach(() => { vi.useFakeTimers(); });
+		afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks(); });
+
+		it("delivers continuation via followUp (user-role in LLM context)", async () => {
+			const goal = createPiLocalGoalState("build feature");
+			const entries = [goalEntry(goal)];
+			const { handlers, createCtx, sendMessage } = setup(entries);
+
+			handlers.session_start({ type: "session_start", reason: "startup" }, createCtx());
+			handlers.turn_end(
+				{ type: "turn_end", turnIndex: 0, message: assistantMsg("Working."), toolResults: [] } as unknown as TurnEndEvent,
+				createCtx(),
+			);
+
+			vi.spyOn(JudgeService.prototype, "evaluate").mockResolvedValue({
+				verdict: "continue",
+				done: false,
+				reason: "keep going",
+				parseFailed: false,
+				preserveParseFailureCounter: false,
+			});
+
+			await handlers.agent_end(
+				{ type: "agent_end", messages: [] } as unknown as AgentEndEvent,
+				createCtx({ isIdle: true }),
+			);
+			vi.runAllTimers();
+
+			expect(sendMessage).toHaveBeenCalledWith(
+				{
+					customType: "pi-goal-hermes:continuation",
+					content: [{ type: "text", text: expect.any(String) }],
+					display: true,
+					details: { goalId: goal.id },
+				},
+				{ deliverAs: "followUp", triggerTurn: true },
+			);
+		});
+	});
+
+	describe("T06: empty response skips judge, no turnsUsed increment", () => {
+		beforeEach(() => { vi.useFakeTimers(); });
+		afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks(); });
+
+		it("does not call judge or increment turnsUsed on whitespace-only response", async () => {
+			const goal = { ...createPiLocalGoalState("build feature"), turnsUsed: 5 };
+			const entries = [goalEntry(goal)];
+			const { handlers, createCtx, sendMessage } = setup(entries);
+
+			handlers.session_start({ type: "session_start", reason: "startup" }, createCtx());
+			handlers.turn_end(
+				{ type: "turn_end", turnIndex: 0, message: assistantMsg("   "), toolResults: [] } as unknown as TurnEndEvent,
+				createCtx(),
+			);
+
+			const evaluateSpy = vi.spyOn(JudgeService.prototype, "evaluate");
+
+			await handlers.agent_end(
+				{ type: "agent_end", messages: [] } as unknown as AgentEndEvent,
+				createCtx({ isIdle: true }),
+			);
+
+			vi.runAllTimers();
+			expect(evaluateSpy).not.toHaveBeenCalled();
+			expect(sendMessage).not.toHaveBeenCalled();
+		});
+	});
+
+	describe("T07: stale continuation abandoned", () => {
+		beforeEach(() => { vi.useFakeTimers(); });
+		afterEach(() => { vi.useRealTimers(); });
+
+		function createQueuePi(): { pi: ExtensionAPI; sendMessage: ReturnType<typeof vi.fn> } {
+			const sendMessage = vi.fn();
+			return { pi: { sendMessage } as unknown as ExtensionAPI, sendMessage };
+		}
+
+		function createQueueCtx(overrides: { isIdle?: boolean; hasPendingMessages?: boolean } = {}): ExtensionContext {
+			return {
+				isIdle: () => overrides.isIdle ?? true,
+				hasPendingMessages: () => overrides.hasPendingMessages ?? false,
+				signal: undefined,
+			} as unknown as ExtensionContext;
+		}
+
+		it("abandons when goal is paused before macrotask fires", () => {
+			const state = createPiLocalGoalState("feature");
+			const pausedState = { ...state, status: "paused" as const };
+			const { pi, sendMessage } = createQueuePi();
+			const ctx = createQueueCtx({ isIdle: true });
+			const continuationState: ContinuationState = { queued: false };
+
+			queueContinuation(pi, ctx, state, () => pausedState, continuationState);
+			vi.runAllTimers();
+
+			expect(sendMessage).not.toHaveBeenCalled();
+			expect(continuationState.queued).toBe(false);
+		});
+
+		it("abandons when goal is cleared (null) before macrotask fires", () => {
+			const state = createPiLocalGoalState("feature");
+			const { pi, sendMessage } = createQueuePi();
+			const ctx = createQueueCtx({ isIdle: true });
+			const continuationState: ContinuationState = { queued: false };
+
+			queueContinuation(pi, ctx, state, () => null, continuationState);
+			vi.runAllTimers();
+
+			expect(sendMessage).not.toHaveBeenCalled();
+			expect(continuationState.queued).toBe(false);
+		});
+
+		it("abandons when a new goal (different id) is set before macrotask fires", () => {
+			const state = createPiLocalGoalState("feature");
+			const newGoal = createPiLocalGoalState("different feature");
+			const { pi, sendMessage } = createQueuePi();
+			const ctx = createQueueCtx({ isIdle: true });
+			const continuationState: ContinuationState = { queued: false };
+
+			queueContinuation(pi, ctx, state, () => newGoal, continuationState);
+			vi.runAllTimers();
+
+			expect(sendMessage).not.toHaveBeenCalled();
+			expect(continuationState.queued).toBe(false);
+		});
+
+		it("abandons when user message is pending before macrotask fires", () => {
+			const state = createPiLocalGoalState("feature");
+			const { pi, sendMessage } = createQueuePi();
+			const ctx = createQueueCtx({ isIdle: true, hasPendingMessages: true });
+			const continuationState: ContinuationState = { queued: false };
+
+			queueContinuation(pi, ctx, state, () => state, continuationState);
+			vi.runAllTimers();
+
+			expect(sendMessage).not.toHaveBeenCalled();
+			expect(continuationState.queued).toBe(false);
+		});
+	});
+
+	describe("T08: /goal clear persists cleared then nullifies, reload does not restore", () => {
+		it("persists cleared state and subsequent reload does not restore goal", () => {
+			const goal = createPiLocalGoalState("to clear");
+			const entries = [goalEntry(goal)];
+			const { handlers, appendEntry, notify, createCtx, registerCommand } = setup(entries);
+
+			handlers.session_start({ type: "session_start", reason: "startup" }, createCtx());
+
+			const goalCmd = registerCommand.mock.calls.find((c: unknown[]) => c[0] === "goal")!;
+			const goalHandler = goalCmd[1].handler as (args: string, ctx: ExtensionContext) => Promise<void>;
+
+			goalHandler("clear", createCtx() as unknown as ExtensionContext);
+
+			expect(appendEntry).toHaveBeenCalledWith(
+				GOAL_CUSTOM_TYPE,
+				expect.objectContaining({ goal: expect.objectContaining({ status: "cleared" }) }),
+			);
+
+			const clearedGoal = { ...goal, status: "cleared" as const };
+			const reloadEntries = [goalEntry(clearedGoal)];
+			const reload = setup(reloadEntries);
+
+			reload.handlers.session_start({ type: "session_start", reason: "startup" }, reload.createCtx());
+
+			expect(reload.notify).not.toHaveBeenCalled();
+		});
+	});
+
+	describe("T12: Ctrl+C / aborted signal -> auto-pause", () => {
+		beforeEach(() => { vi.useFakeTimers(); });
+		afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks(); });
+
+		it("auto-pauses on signal.aborted without calling judge", async () => {
+			const goal = createPiLocalGoalState("build feature");
+			const entries = [goalEntry(goal)];
+			const { handlers, createCtx, appendEntry, sendMessage } = setup(entries);
+
+			handlers.session_start({ type: "session_start", reason: "startup" }, createCtx());
+			handlers.turn_end(
+				{ type: "turn_end", turnIndex: 0, message: assistantMsg("Working..."), toolResults: [] } as unknown as TurnEndEvent,
+				createCtx(),
+			);
+
+			const evaluateSpy = vi.spyOn(JudgeService.prototype, "evaluate");
+
+			await handlers.agent_end(
+				{ type: "agent_end", messages: [] } as unknown as AgentEndEvent,
+				createCtx({ signal: { aborted: true } }),
+			);
+
+			expect(evaluateSpy).not.toHaveBeenCalled();
+			expect(appendEntry).toHaveBeenCalledWith(
+				GOAL_CUSTOM_TYPE,
+				expect.objectContaining({
+					goal: expect.objectContaining({ status: "paused", pausedReason: "interrupted (Ctrl+C)" }),
+				}),
+			);
+			vi.runAllTimers();
+			expect(sendMessage).not.toHaveBeenCalledWith(
+				expect.objectContaining({ customType: "pi-goal-hermes:continuation" }),
+				expect.anything(),
+			);
+		});
+	});
+
+	describe("T13: sendMessage payload uses only { customType, content, display, details }", () => {
+		beforeEach(() => { vi.useFakeTimers(); });
+		afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks(); });
+
+		it("payload and options have exactly the expected keys", async () => {
+			const goal = createPiLocalGoalState("build feature");
+			const entries = [goalEntry(goal)];
+			const { handlers, createCtx, sendMessage } = setup(entries);
+
+			handlers.session_start({ type: "session_start", reason: "startup" }, createCtx());
+			handlers.turn_end(
+				{ type: "turn_end", turnIndex: 0, message: assistantMsg("Working."), toolResults: [] } as unknown as TurnEndEvent,
+				createCtx(),
+			);
+
+			vi.spyOn(JudgeService.prototype, "evaluate").mockResolvedValue({
+				verdict: "continue",
+				done: false,
+				reason: "keep going",
+				parseFailed: false,
+				preserveParseFailureCounter: false,
+			});
+
+			await handlers.agent_end(
+				{ type: "agent_end", messages: [] } as unknown as AgentEndEvent,
+				createCtx({ isIdle: true }),
+			);
+			vi.runAllTimers();
+
+			const continuationCall = sendMessage.mock.calls.find(
+				(call: unknown[]) => (call[0] as Record<string, unknown>).customType === "pi-goal-hermes:continuation",
+			);
+			expect(continuationCall).toBeDefined();
+			const payload = continuationCall![0] as Record<string, unknown>;
+			const options = continuationCall![1] as Record<string, unknown>;
+
+			expect(Object.keys(payload).sort()).toEqual(["content", "customType", "details", "display"]);
+			expect(Object.keys(options).sort()).toEqual(["deliverAs", "triggerTurn"]);
+		});
+	});
+
+	describe("T14: error/aborted assistant response -> pause, no judge", () => {
+		afterEach(() => { vi.restoreAllMocks(); });
+
+		it("pauses with error message when stopReason is 'error'", async () => {
+			const goal = createPiLocalGoalState("build feature");
+			const entries = [goalEntry(goal)];
+			const { handlers, createCtx, appendEntry } = setup(entries);
+
+			handlers.session_start({ type: "session_start", reason: "startup" }, createCtx());
+			handlers.turn_end(
+				{ type: "turn_end", turnIndex: 0, message: assistantMsg("Oops", "error", "rate limit"), toolResults: [] } as unknown as TurnEndEvent,
+				createCtx(),
+			);
+
+			const evaluateSpy = vi.spyOn(JudgeService.prototype, "evaluate");
+
+			await handlers.agent_end(
+				{ type: "agent_end", messages: [] } as unknown as AgentEndEvent,
+				createCtx(),
+			);
+
+			expect(evaluateSpy).not.toHaveBeenCalled();
+			expect(appendEntry).toHaveBeenCalledWith(
+				GOAL_CUSTOM_TYPE,
+				expect.objectContaining({
+					goal: expect.objectContaining({ status: "paused", pausedReason: "error: rate limit" }),
+				}),
+			);
+		});
+
+		it("pauses with aborted message when stopReason is 'aborted'", async () => {
+			const goal = createPiLocalGoalState("build feature");
+			const entries = [goalEntry(goal)];
+			const { handlers, createCtx, appendEntry } = setup(entries);
+
+			handlers.session_start({ type: "session_start", reason: "startup" }, createCtx());
+			handlers.turn_end(
+				{ type: "turn_end", turnIndex: 0, message: assistantMsg("...", "aborted"), toolResults: [] } as unknown as TurnEndEvent,
+				createCtx(),
+			);
+
+			const evaluateSpy = vi.spyOn(JudgeService.prototype, "evaluate");
+
+			await handlers.agent_end(
+				{ type: "agent_end", messages: [] } as unknown as AgentEndEvent,
+				createCtx(),
+			);
+
+			expect(evaluateSpy).not.toHaveBeenCalled();
+			expect(appendEntry).toHaveBeenCalledWith(
+				GOAL_CUSTOM_TYPE,
+				expect.objectContaining({
+					goal: expect.objectContaining({ status: "paused", pausedReason: "assistant response aborted" }),
+				}),
+			);
+		});
+	});
+
+	describe("T15: judge timeout/abort treated as transport error (fail-open)", () => {
+		afterEach(() => { vi.restoreAllMocks(); });
+
+		it("continues with preserved parse failure counter on judge transport error", async () => {
+			const state = createGoalState({ consecutiveParseFailures: 1 });
+			const { pi } = createPi();
+
+			vi.spyOn(JudgeService.prototype, "evaluate").mockResolvedValue({
+				verdict: "continue",
+				done: false,
+				reason: "request timed out",
+				parseFailed: false,
+				preserveParseFailureCounter: true,
+			});
+
+			const result = await evaluateWithJudge(pi, createExtensionContext(), state, "some response");
+
+			expect(result.shouldContinue).toBe(true);
+			expect(state.turnsUsed).toBe(1);
+			expect(state.consecutiveParseFailures).toBe(1);
 		});
 	});
 });

@@ -79,14 +79,14 @@
 
 ## 8. Regression Tests & Edge Cases
 
-- [ ] 8.1 Write regression test T01: agent_end judge=continue uses idle macrotask + ctx.isIdle() + triggerTurn:true
-- [ ] 8.2 Write regression test T02: tool-call chain multiple turn_end, judge only at agent_end
-- [ ] 8.3 Write regression test T03: custom continuation message is user-role in LLM context
-- [ ] 8.4 Write regression test T06: empty response skips judge, no turnsUsed increment
-- [ ] 8.5 Write regression test T07: stale continuation abandoned (pause/clear/new-goal/pending-user)
-- [ ] 8.6 Write regression test T08: /goal clear persists cleared then nullifies, reload does not restore
-- [ ] 8.7 Write regression test T12: Ctrl+C / aborted signal -> auto-pause
-- [ ] 8.8 Write regression test T13: sendMessage payload uses only { customType, content, display, details }
-- [ ] 8.9 Write regression test T14: error/aborted assistant response -> pause, no judge
-- [ ] 8.10 Write regression test T15: judge timeout/abort treated as transport error (fail-open)
-- [ ] 8.11 Run all tests and ensure zero failures before declaring implementation complete
+- [x] 8.1 Write regression test T01: agent_end judge=continue uses idle macrotask + ctx.isIdle() + triggerTurn:true
+- [x] 8.2 Write regression test T02: tool-call chain multiple turn_end, judge only at agent_end
+- [x] 8.3 Write regression test T03: custom continuation message is user-role in LLM context
+- [x] 8.4 Write regression test T06: empty response skips judge, no turnsUsed increment
+- [x] 8.5 Write regression test T07: stale continuation abandoned (pause/clear/new-goal/pending-user)
+- [x] 8.6 Write regression test T08: /goal clear persists cleared then nullifies, reload does not restore
+- [x] 8.7 Write regression test T12: Ctrl+C / aborted signal -> auto-pause
+- [x] 8.8 Write regression test T13: sendMessage payload uses only { customType, content, display, details }
+- [x] 8.9 Write regression test T14: error/aborted assistant response -> pause, no judge
+- [x] 8.10 Write regression test T15: judge timeout/abort treated as transport error (fail-open)
+- [x] 8.11 Run all tests and ensure zero failures before declaring implementation complete
