@@ -1,5 +1,5 @@
 import { streamSimple, type AssistantMessage, type Model, type UserMessage } from "@earendil-works/pi-ai";
-import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 
 export const JUDGE_SYSTEM_PROMPT = `You are a strict judge evaluating whether an autonomous agent has achieved a user's stated goal. You receive the goal text and the agent's most recent response. Your only job is to decide whether the goal is fully satisfied based on that response.
 
@@ -34,7 +34,7 @@ export interface JudgeVerdict {
 }
 
 export class JudgeService {
-	async evaluate(input: JudgeServiceInput, ctx: ExtensionContext): Promise<JudgeVerdict> {
+	async evaluate(input: JudgeServiceInput, ctx: ExtensionContext, pi?: ExtensionAPI): Promise<JudgeVerdict> {
 		const model = findJudgeModel(ctx);
 		if (!model) {
 			return {
@@ -57,12 +57,16 @@ export class JudgeService {
 			};
 		}
 
+		const judgeMessage = makeJudgeMessage(input);
+		const judgePrompt = extractUserText(judgeMessage);
+		const startMs = Date.now();
+
 		try {
 			const stream = streamSimple(
 				model,
 				{
 					systemPrompt: JUDGE_SYSTEM_PROMPT,
-					messages: [makeJudgeMessage(input)],
+					messages: [judgeMessage],
 				},
 				{
 					apiKey: auth.apiKey,
@@ -74,17 +78,74 @@ export class JudgeService {
 				},
 			);
 			const message = await stream.result();
-			return parseJudgeResponse(extractTextContent(message));
+			const rawResponse = extractTextContent(message);
+			const durationMs = Date.now() - startMs;
+			const verdict = parseJudgeResponse(rawResponse);
+
+			if (pi) {
+				pi.sendMessage<JudgeEntryDetails>({
+					customType: "pi-goal-hermes:judge",
+					content: `Judge: ${verdict.verdict} — ${verdict.reason}`,
+					display: false,
+					details: {
+						model: model.id,
+						prompt: judgePrompt,
+						rawResponse,
+						verdict: verdict.verdict,
+						reason: verdict.reason,
+						done: verdict.done,
+						parseFailed: verdict.parseFailed,
+						durationMs,
+						usage: message.usage ?? null,
+					},
+				});
+			}
+
+			return verdict;
 		} catch (error) {
+			const durationMs = Date.now() - startMs;
+			const reason = error instanceof Error ? error.message : String(error);
+
+			if (pi) {
+				pi.sendMessage<JudgeEntryDetails>({
+					customType: "pi-goal-hermes:judge",
+					content: `Judge: error — ${reason}`,
+					display: false,
+					details: {
+						model: model.id,
+						prompt: judgePrompt,
+						rawResponse: null,
+						verdict: "continue",
+						reason,
+						done: false,
+						parseFailed: false,
+						durationMs,
+						usage: null,
+					},
+				});
+			}
+
 			return {
 				verdict: "continue",
 				done: false,
-				reason: error instanceof Error ? error.message : String(error),
+				reason,
 				parseFailed: false,
 				preserveParseFailureCounter: true,
 			};
 		}
 	}
+}
+
+export interface JudgeEntryDetails {
+	model: string;
+	prompt: string;
+	rawResponse: string | null;
+	verdict: "done" | "continue";
+	reason: string;
+	done: boolean;
+	parseFailed: boolean;
+	durationMs: number;
+	usage: unknown;
 }
 
 export function buildJudgeUserPrompt(goal: string, response: string): string {
@@ -149,10 +210,7 @@ export function parseJudgeResponse(raw: string): JudgeVerdict {
 }
 
 function findJudgeModel(ctx: ExtensionContext): Model<any> | undefined {
-	return (
-		ctx.modelRegistry.find("anthropic", "claude-haiku-4-5") ??
-		ctx.modelRegistry.find("openai", "gpt-4o-mini")
-	);
+	return ctx.model;
 }
 
 function makeJudgeMessage(input: JudgeServiceInput): UserMessage {
@@ -178,14 +236,22 @@ function extractTextContent(message: AssistantMessage): string {
 		.join("\n");
 }
 
+function extractUserText(msg: UserMessage): string {
+	if (typeof msg.content === "string") return msg.content;
+	return msg.content
+		.filter((part): part is { type: "text"; text: string } => part.type === "text")
+		.map((part) => part.text)
+		.join("\n");
+}
+
 function extractMarkdownJson(raw: string): string | null {
 	const match = raw.match(/```(?:json)?\s*([\s\S]*?)\s*```/i);
 	return match?.[1]?.trim() || null;
 }
 
 function extractEmbeddedJson(raw: string): string | null {
-	const match = raw.match(/\{[\s\S]*\}/);
-	return match?.[0]?.trim() || null;
+	const match = raw.trim().match(/^(?:(?:judge\s+)?(?:verdict|decision|result)\s*:\s*)?(\{[\s\S]*\})$/i);
+	return match?.[1]?.trim() || null;
 }
 
 function tryParseJudgeJson(candidate: string): JudgeVerdict | null {

@@ -1,6 +1,6 @@
 ---
 type: wiki
-updated: 2026-05-21
+updated: 2026-05-23
 ---
 
 # Architecture Index
@@ -9,3 +9,5 @@ updated: 2026-05-21
 
 ## Pages
 - [[wiki/architecture/implicit-contracts|Implicit Contracts]]
+- [[wiki/architecture/goal-hermes-evaluate|Pi Goal Hermes - Evaluate Method]]
+- [[wiki/architecture/debug-dashboard|Debug Dashboard]]

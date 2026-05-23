@@ -1,0 +1,400 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Pi Debug Dashboard</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: 'SF Mono', 'Fira Code', monospace; background: #0d1117; color: #c9d1d9; font-size: 13px; }
+
+.layout { display: flex; height: 100vh; }
+.sidebar { width: 280px; border-right: 1px solid #21262d; overflow-y: auto; flex-shrink: 0; }
+.main { flex: 1; overflow-y: auto; padding: 16px; }
+
+.header { padding: 12px 16px; border-bottom: 1px solid #21262d; position: sticky; top: 0; background: #0d1117; z-index: 10; }
+.header h1 { font-size: 14px; color: #58a6ff; margin-bottom: 4px; }
+.header .stats { font-size: 11px; color: #8b949e; }
+
+.turn-item { padding: 8px 16px; cursor: pointer; border-bottom: 1px solid #161b22; transition: background 0.1s; }
+.turn-item:hover { background: #161b22; }
+.turn-item.active { background: #1c2128; border-left: 3px solid #58a6ff; }
+.turn-item .turn-num { color: #58a6ff; font-weight: bold; font-size: 11px; }
+.turn-item .turn-meta { color: #8b949e; font-size: 10px; margin-top: 2px; }
+.turn-item .turn-preview { color: #c9d1d9; font-size: 11px; margin-top: 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.turn-item.goal-event { border-left: 3px solid #f0883e; }
+.turn-item.continuation { border-left: 3px solid #a371f7; }
+.turn-item.judge { border-left: 3px solid #7ee787; }
+.turn-item.judge-fail { border-left: 3px solid #f85149; }
+
+.detail-section { margin-bottom: 20px; }
+.detail-section h3 { font-size: 12px; color: #8b949e; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 8px; padding-bottom: 4px; border-bottom: 1px solid #21262d; }
+
+.meta-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 8px; margin-bottom: 16px; }
+.meta-card { background: #161b22; border: 1px solid #21262d; border-radius: 6px; padding: 8px 12px; }
+.meta-card .label { font-size: 10px; color: #8b949e; text-transform: uppercase; }
+.meta-card .value { font-size: 14px; color: #c9d1d9; margin-top: 2px; }
+
+.thinking-block { background: #1c1c3a; border: 1px solid #2d2d5e; border-radius: 6px; padding: 12px; margin-bottom: 12px; white-space: pre-wrap; word-break: break-word; font-size: 12px; color: #b4b4d4; max-height: 300px; overflow-y: auto; }
+.thinking-block::before { content: "THINKING"; display: block; font-size: 10px; color: #7c7caa; margin-bottom: 6px; font-weight: bold; }
+
+.text-block { background: #161b22; border: 1px solid #21262d; border-radius: 6px; padding: 12px; margin-bottom: 12px; white-space: pre-wrap; word-break: break-word; font-size: 12px; line-height: 1.5; }
+
+.tool-call { background: #0d2137; border: 1px solid #1a3a5c; border-radius: 6px; margin-bottom: 8px; overflow: hidden; }
+.tool-call-header { padding: 6px 12px; background: #112a45; font-size: 11px; display: flex; justify-content: space-between; align-items: center; }
+.tool-call-header .name { color: #79c0ff; font-weight: bold; }
+.tool-call-header .id { color: #484f58; font-size: 10px; }
+.tool-call-body { padding: 8px 12px; font-size: 11px; white-space: pre-wrap; word-break: break-word; max-height: 200px; overflow-y: auto; color: #8b949e; }
+
+.tool-result { background: #0d2d1b; border: 1px solid #1a4a2e; border-radius: 6px; margin-bottom: 8px; overflow: hidden; }
+.tool-result.error { background: #2d1b1b; border-color: #4a1a1a; }
+.tool-result-header { padding: 6px 12px; background: #112d1a; font-size: 11px; display: flex; justify-content: space-between; }
+.tool-result.error .tool-result-header { background: #2d1111; }
+.tool-result-header .name { color: #7ee787; font-weight: bold; }
+.tool-result.error .tool-result-header .name { color: #f85149; }
+.tool-result-body { padding: 8px 12px; font-size: 11px; white-space: pre-wrap; word-break: break-word; max-height: 200px; overflow-y: auto; color: #8b949e; }
+
+.goal-event-block { background: #2d1f0d; border: 1px solid #5c3a0d; border-radius: 6px; padding: 12px; margin-bottom: 12px; }
+.goal-event-block .event-type { color: #f0883e; font-weight: bold; font-size: 12px; }
+.goal-event-block .event-details { color: #8b949e; font-size: 11px; margin-top: 4px; }
+
+.continuation-block { background: #1f0d2d; border: 1px solid #3a0d5c; border-radius: 6px; padding: 12px; margin-bottom: 12px; }
+.continuation-block::before { content: "CONTINUATION PROMPT"; display: block; font-size: 10px; color: #a371f7; margin-bottom: 6px; font-weight: bold; }
+.continuation-block .prompt-text { color: #c9a0ff; font-size: 12px; white-space: pre-wrap; }
+
+.judge-block { background: #1a2d1f; border: 1px solid #2d5c3a; border-radius: 6px; padding: 12px; margin-bottom: 12px; }
+.judge-block.done { border-color: #3d8c4f; }
+.judge-block.continue { border-color: #5c5c2d; }
+.judge-block .judge-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+.judge-block .judge-verdict { font-weight: bold; font-size: 13px; }
+.judge-block .judge-verdict.done { color: #7ee787; }
+.judge-block .judge-verdict.continue { color: #f0883e; }
+.judge-block .judge-meta { font-size: 10px; color: #8b949e; }
+.judge-block .judge-reason { color: #c9d1d9; font-size: 12px; margin-bottom: 8px; }
+.judge-block .judge-prompt { background: #0d1a14; border: 1px solid #1a3d2d; border-radius: 4px; padding: 8px; font-size: 11px; color: #8b949e; white-space: pre-wrap; word-break: break-word; max-height: 200px; overflow-y: auto; margin-bottom: 8px; }
+.judge-block .judge-response { background: #0d1a14; border: 1px solid #1a3d2d; border-radius: 4px; padding: 8px; font-size: 11px; color: #b4d4c0; white-space: pre-wrap; word-break: break-word; max-height: 100px; overflow-y: auto; }
+
+.empty-state { text-align: center; padding: 60px 20px; color: #484f58; }
+.empty-state h2 { font-size: 16px; margin-bottom: 8px; }
+
+.badge { display: inline-block; padding: 2px 6px; border-radius: 3px; font-size: 10px; font-weight: bold; }
+.badge-model { background: #1f3d2d; color: #7ee787; }
+.badge-tokens { background: #1f2d3d; color: #79c0ff; }
+.badge-stop { background: #3d2d1f; color: #f0883e; }
+</style>
+</head>
+<body>
+<div class="layout">
+  <div class="sidebar">
+    <div class="header">
+      <h1>Pi Debug Dashboard</h1>
+      <div class="stats" id="stats">Connecting...</div>
+    </div>
+    <div id="turn-list"></div>
+  </div>
+  <div class="main" id="detail">
+    <div class="empty-state">
+      <h2>Select a turn</h2>
+      <p>Click an entry in the sidebar to view details</p>
+    </div>
+  </div>
+</div>
+
+<script>
+let entries = [];
+let groups = [];
+let selectedIdx = -1;
+
+function groupEntries(rawEntries) {
+  const result = [];
+  let current = null;
+
+  for (const entry of rawEntries) {
+    const role = entry.role;
+    const customType = entry.customType || '';
+
+    if (role === 'assistant') {
+      if (current) result.push(current);
+      current = { type: 'turn', assistant: entry, toolResults: [], index: result.length };
+    } else if (role === 'toolResult') {
+      if (current && current.type === 'turn') {
+        current.toolResults.push(entry);
+      }
+    } else if (role === 'custom') {
+      if (current) result.push(current);
+      current = { type: 'custom', customType, entry, index: result.length };
+    } else if (role === 'user') {
+      if (current) result.push(current);
+      current = { type: 'user', entry, index: result.length };
+    }
+  }
+  if (current) result.push(current);
+  return result;
+}
+
+function formatTokens(usage) {
+  if (!usage) return '';
+  const total = usage.totalTokens || (usage.input + usage.output);
+  return `${total.toLocaleString()} tok`;
+}
+
+function formatTime(ts) {
+  if (!ts) return '';
+  const d = new Date(ts);
+  return d.toLocaleTimeString('en-US', { hour12: false });
+}
+
+function getPreview(group) {
+  if (group.type === 'custom') {
+    const ct = group.customType;
+    if (ct === 'pi-goal-hermes:event') {
+      return group.entry.details?.eventType || 'goal event';
+    }
+    if (ct === 'pi-goal-hermes:continuation') {
+      return 'Continuation prompt';
+    }
+    if (ct === 'pi-goal-hermes:judge') {
+      const d = group.entry.details;
+      return d ? `${d.verdict} — ${d.reason?.slice(0, 40)}` : 'judge';
+    }
+    }
+    return ct;
+  }
+  if (group.type === 'user') {
+    const content = group.entry.content;
+    if (Array.isArray(content)) {
+      const textPart = content.find(c => c.type === 'text');
+      return textPart?.text?.slice(0, 60) || 'user message';
+    }
+    return typeof content === 'string' ? content.slice(0, 60) : 'user message';
+  }
+  if (group.type === 'turn') {
+    const blocks = group.assistant.content || [];
+    const textBlock = blocks.find(b => b.type === 'text');
+    if (textBlock) return textBlock.text.slice(0, 60);
+    const toolCalls = blocks.filter(b => b.type === 'toolCall');
+    if (toolCalls.length) return toolCalls.map(t => t.name).join(', ');
+    const thinking = blocks.find(b => b.type === 'thinking');
+    if (thinking) return '[thinking] ' + thinking.thinking.slice(0, 40);
+    return '(empty)';
+  }
+  return '';
+}
+
+function renderSidebar() {
+  const list = document.getElementById('turn-list');
+  let turnNum = 0;
+  list.innerHTML = groups.map((g, i) => {
+    let cls = '';
+    let numLabel = '';
+    let meta = '';
+
+    if (g.type === 'turn') {
+      turnNum++;
+      numLabel = `Turn ${turnNum}`;
+      const a = g.assistant;
+      meta = [a.model, formatTokens(a.usage), formatTime(a.timestamp)].filter(Boolean).join(' | ');
+    } else if (g.type === 'custom' && g.customType === 'pi-goal-hermes:event') {
+      cls = 'goal-event';
+      numLabel = 'Goal';
+    } else if (g.type === 'custom' && g.customType === 'pi-goal-hermes:continuation') {
+      cls = 'continuation';
+      numLabel = 'Continue';
+    } else if (g.type === 'custom' && g.customType === 'pi-goal-hermes:judge') {
+      const jd = g.entry.details;
+      cls = jd?.done ? 'judge' : 'judge-fail';
+      numLabel = 'Judge';
+      meta = [jd?.model, jd?.durationMs ? `${jd.durationMs}ms` : '', formatTime(g.entry.timestamp)].filter(Boolean).join(' | ');
+    } else if (g.type === 'user') {
+      numLabel = 'User';
+    } else {
+      numLabel = g.customType || 'Custom';
+    }
+
+    const active = i === selectedIdx ? 'active' : '';
+    const preview = getPreview(g);
+
+    return `<div class="turn-item ${cls} ${active}" onclick="selectGroup(${i})">
+      <div class="turn-num">${numLabel}</div>
+      ${meta ? `<div class="turn-meta">${meta}</div>` : ''}
+      <div class="turn-preview">${escHtml(preview)}</div>
+    </div>`;
+  }).join('');
+}
+
+function selectGroup(idx) {
+  selectedIdx = idx;
+  renderSidebar();
+  renderDetail(groups[idx]);
+}
+
+function renderDetail(group) {
+  const el = document.getElementById('detail');
+  if (!group) { el.innerHTML = '<div class="empty-state"><h2>Select a turn</h2></div>'; return; }
+
+  if (group.type === 'custom' && group.customType === 'pi-goal-hermes:event') {
+    const d = group.entry.details || {};
+    el.innerHTML = `
+      <div class="goal-event-block">
+        <div class="event-type">${escHtml(d.eventType || 'unknown')}</div>
+        <div class="event-details">
+          <div>Goal: ${escHtml(d.goal || '')}</div>
+          <div>Status: ${d.status} | Turns: ${d.turnsUsed}/${d.maxTurns}</div>
+          ${d.lastVerdict ? `<div>Verdict: ${d.lastVerdict} — ${escHtml(d.lastReason || '')}</div>` : ''}
+          ${d.pausedReason ? `<div>Paused: ${escHtml(d.pausedReason)}</div>` : ''}
+        </div>
+      </div>`;
+    return;
+  }
+
+  if (group.type === 'custom' && group.customType === 'pi-goal-hermes:continuation') {
+    const content = group.entry.content;
+    let text = '';
+    if (Array.isArray(content)) {
+      text = content.filter(c => c.type === 'text').map(c => c.text).join('\n');
+    } else {
+      text = content || '';
+    }
+    el.innerHTML = `<div class="continuation-block"><div class="prompt-text">${escHtml(text)}</div></div>`;
+    return;
+  }
+
+  if (group.type === 'custom' && group.customType === 'pi-goal-hermes:judge') {
+    const d = group.entry.details || {};
+    const vcls = d.done ? 'done' : 'continue';
+    el.innerHTML = `
+      <div class="judge-block ${vcls}">
+        <div class="judge-header">
+          <span class="judge-verdict ${vcls}">${d.verdict?.toUpperCase() || '?'}</span>
+          <span class="judge-meta">${escHtml(d.model || '?')} | ${d.durationMs || '?'}ms</span>
+        </div>
+        <div class="judge-reason">${escHtml(d.reason || '')}</div>
+        <div class="detail-section"><h3>Judge Prompt</h3>
+          <div class="judge-prompt">${escHtml(d.prompt || '')}</div>
+        </div>
+        <div class="detail-section"><h3>Raw Response</h3>
+          <div class="judge-response">${escHtml(d.rawResponse || '(none)')}</div>
+        </div>
+        ${d.usage ? `<div class="detail-section"><h3>Usage</h3><div class="text-block">${escHtml(JSON.stringify(d.usage, null, 2))}</div></div>` : ''}
+      </div>`;
+    return;
+  }
+
+  if (group.type === 'user') {
+    const content = group.entry.content;
+    let text = '';
+    if (Array.isArray(content)) {
+      text = content.filter(c => c.type === 'text').map(c => c.text).join('\n');
+    } else {
+      text = typeof content === 'string' ? content : JSON.stringify(content);
+    }
+    el.innerHTML = `<div class="text-block">${escHtml(text)}</div>`;
+    return;
+  }
+
+  if (group.type !== 'turn') {
+    el.innerHTML = `<div class="text-block">${escHtml(JSON.stringify(group.entry, null, 2))}</div>`;
+    return;
+  }
+
+  const a = group.assistant;
+  let html = '';
+
+  html += `<div class="meta-grid">
+    <div class="meta-card"><div class="label">Model</div><div class="value">${escHtml(a.model || '?')}</div></div>
+    <div class="meta-card"><div class="label">Provider</div><div class="value">${escHtml(a.provider || '?')}</div></div>
+    <div class="meta-card"><div class="label">Stop Reason</div><div class="value">${escHtml(a.stopReason || '?')}</div></div>
+    <div class="meta-card"><div class="label">Tokens</div><div class="value">${formatTokens(a.usage)}</div></div>
+    <div class="meta-card"><div class="label">Input</div><div class="value">${a.usage?.input?.toLocaleString() || '?'}</div></div>
+    <div class="meta-card"><div class="label">Cache Read</div><div class="value">${a.usage?.cacheRead?.toLocaleString() || '0'}</div></div>
+    <div class="meta-card"><div class="label">Output</div><div class="value">${a.usage?.output?.toLocaleString() || '?'}</div></div>
+    <div class="meta-card"><div class="label">Time</div><div class="value">${formatTime(a.timestamp)}</div></div>
+  </div>`;
+
+  const blocks = a.content || [];
+
+  const thinking = blocks.filter(b => b.type === 'thinking');
+  if (thinking.length) {
+    html += `<div class="detail-section"><h3>Thinking</h3>`;
+    for (const t of thinking) {
+      html += `<div class="thinking-block">${escHtml(t.thinking)}</div>`;
+    }
+    html += `</div>`;
+  }
+
+  const textBlocks = blocks.filter(b => b.type === 'text');
+  if (textBlocks.length) {
+    html += `<div class="detail-section"><h3>Response</h3>`;
+    for (const t of textBlocks) {
+      html += `<div class="text-block">${escHtml(t.text)}</div>`;
+    }
+    html += `</div>`;
+  }
+
+  const toolCalls = blocks.filter(b => b.type === 'toolCall');
+  if (toolCalls.length) {
+    html += `<div class="detail-section"><h3>Tool Calls (${toolCalls.length})</h3>`;
+    for (const tc of toolCalls) {
+      const argsStr = typeof tc.arguments === 'string' ? tc.arguments : JSON.stringify(tc.arguments, null, 2);
+      html += `<div class="tool-call">
+        <div class="tool-call-header"><span class="name">${escHtml(tc.name)}</span><span class="id">${escHtml(tc.id?.slice(-8) || '')}</span></div>
+        <div class="tool-call-body">${escHtml(argsStr)}</div>
+      </div>`;
+    }
+    html += `</div>`;
+  }
+
+  if (group.toolResults.length) {
+    html += `<div class="detail-section"><h3>Tool Results (${group.toolResults.length})</h3>`;
+    for (const tr of group.toolResults) {
+      const isErr = tr.isError;
+      const content = Array.isArray(tr.content) ? tr.content.map(c => c.text || '').join('\n') : String(tr.content || '');
+      const preview = content.length > 2000 ? content.slice(0, 2000) + '\n... [truncated]' : content;
+      html += `<div class="tool-result${isErr ? ' error' : ''}">
+        <div class="tool-result-header"><span class="name">${escHtml(tr.toolName || '?')}</span></div>
+        <div class="tool-result-body">${escHtml(preview)}</div>
+      </div>`;
+    }
+    html += `</div>`;
+  }
+
+  el.innerHTML = html;
+}
+
+function escHtml(s) {
+  if (!s) return '';
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+function updateStats() {
+  const assistantCount = groups.filter(g => g.type === 'turn').length;
+  const totalTokens = groups.reduce((sum, g) => {
+    if (g.type === 'turn' && g.assistant.usage) {
+      return sum + (g.assistant.usage.totalTokens || 0);
+    }
+    return sum;
+  }, 0);
+  document.getElementById('stats').textContent = `${assistantCount} turns | ${entries.length} entries | ${totalTokens.toLocaleString()} tokens`;
+}
+
+const evtSource = new EventSource('/events');
+evtSource.onmessage = (e) => {
+  const data = JSON.parse(e.data);
+  if (data.type === 'reset') {
+    entries = data.entries;
+  } else if (data.type === 'delta') {
+    entries = entries.concat(data.entries);
+  }
+  groups = groupEntries(entries);
+  renderSidebar();
+  updateStats();
+  if (selectedIdx >= 0 && selectedIdx < groups.length) {
+    renderDetail(groups[selectedIdx]);
+  }
+};
+evtSource.onerror = () => {
+  document.getElementById('stats').textContent = 'Disconnected — retrying...';
+};
+</script>
+</body>
+</html>

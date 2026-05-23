@@ -24,6 +24,7 @@ export async function evaluateWithJudge(
 			subgoals: state.subgoals,
 		},
 		ctx,
+		pi,
 	);
 
 	state.lastVerdict = verdict.verdict;

@@ -240,6 +240,8 @@ export default function piGoalHermes(pi: ExtensionAPI) {
 		goal.consecutiveParseFailures = 0;
 		goal.status = "active";
 		goal.pausedReason = null;
+		goal.lastVerdict = null;
+		goal.lastReason = null;
 		goal.updatedAt = Date.now();
 		persist(pi, ctx, goal);
 		emitGoalEvent(pi, "goal-resumed", goal);
