@@ -10,7 +10,7 @@ body { font-family: 'SF Mono', 'Fira Code', monospace; background: #0d1117; colo
 
 .layout { display: flex; height: 100vh; }
 .sidebar { width: 300px; border-right: 1px solid #21262d; display: flex; flex-direction: column; flex-shrink: 0; }
-.main { flex: 1; overflow-y: auto; padding: 16px; }
+.main { flex: 1; overflow-y: auto; }
 
 .header { padding: 12px 16px; border-bottom: 1px solid #21262d; background: #0d1117; z-index: 10; }
 .header h1 { font-size: 14px; color: #58a6ff; margin-bottom: 4px; }
@@ -101,6 +101,20 @@ body { font-family: 'SF Mono', 'Fira Code', monospace; background: #0d1117; colo
 
 .kbd-hint { position: fixed; bottom: 16px; left: 316px; font-size: 10px; color: #484f58; z-index: 100; }
 .kbd { background: #21262d; border: 1px solid #30363d; border-radius: 3px; padding: 1px 4px; font-size: 9px; }
+
+.session-bar { padding: 6px 12px; border-bottom: 1px solid #21262d; background: #0d1117; display: flex; gap: 6px; align-items: center; }
+.session-select { flex: 1; background: #161b22; border: 1px solid #21262d; border-radius: 3px; padding: 4px 6px; color: #c9d1d9; font-size: 11px; font-family: inherit; outline: none; }
+.session-select:focus { border-color: #58a6ff; }
+.auto-follow-btn { padding: 4px 8px; border-radius: 3px; font-size: 10px; cursor: pointer; font-family: inherit; background: #21262d; border: 1px solid #30363d; color: #8b949e; white-space: nowrap; }
+.auto-follow-btn:hover { border-color: #484f58; color: #c9d1d9; }
+.auto-follow-btn.active { background: #1f3d5c; border-color: #58a6ff; color: #58a6ff; }
+
+.system-prompt-panel { margin: 8px 16px; border: 1px solid #21262d; border-radius: 4px; background: #161b22; }
+.prompt-header { padding: 6px 12px; font-size: 11px; color: #8b949e; cursor: pointer; user-select: none; border-bottom: 1px solid #21262d; }
+.prompt-header:hover { color: #c9d1d9; }
+.prompt-toggle { float: right; font-size: 10px; }
+.prompt-content { padding: 8px 12px; font-size: 11px; white-space: pre-wrap; word-break: break-word; max-height: 400px; overflow-y: auto; color: #c9d1d9; line-height: 1.5; }
+.prompt-content.hidden { display: none; }
 </style>
 </head>
 <body>
@@ -109,6 +123,12 @@ body { font-family: 'SF Mono', 'Fira Code', monospace; background: #0d1117; colo
     <div class="header">
       <h1>Pi Debug Dashboard</h1>
       <div class="stats" id="stats">Connecting...</div>
+    </div>
+    <div class="session-bar">
+      <select class="session-select" id="session-select" onchange="loadSession(this.value)">
+        <option value="">Loading sessions...</option>
+      </select>
+      <button class="auto-follow-btn active" id="auto-follow-btn" onclick="toggleAutoFollow()">Auto: ON</button>
     </div>
     <div class="controls">
       <input class="search-box" id="search" type="text" placeholder="Search entries... (Ctrl+F)" />
@@ -124,9 +144,11 @@ body { font-family: 'SF Mono', 'Fira Code', monospace; background: #0d1117; colo
     <div class="turn-list" id="turn-list"></div>
   </div>
   <div class="main" id="detail">
-    <div class="empty-state">
-      <h2>Select a turn</h2>
-      <p>Click an entry in the sidebar to view details</p>
+    <div class="system-prompt-panel" id="system-prompt-panel">
+      <div class="prompt-header" onclick="document.getElementById('prompt-content').classList.toggle('hidden')">
+        System Prompt <span class="prompt-toggle">[show/hide]</span>
+      </div>
+      <pre class="prompt-content hidden" id="prompt-content"></pre>
     </div>
   </div>
 </div>
@@ -138,6 +160,7 @@ let entries = [];
 let groups = [];
 let selectedIdx = -1;
 let autoScroll = true;
+let autoFollow = true;
 let searchQuery = '';
 let activeFilters = new Set(['all', 'turn', 'user', 'goal', 'judge', 'continuation']);
 
@@ -307,13 +330,27 @@ function selectGroup(idx) {
   renderDetail(groups[idx]);
 }
 
+function getOrCreateDetailContent() {
+  let dc = document.getElementById('detail-content');
+  if (!dc) {
+    dc = document.createElement('div');
+    dc.id = 'detail-content';
+    dc.style.padding = '16px';
+    document.getElementById('detail').appendChild(dc);
+  }
+  return dc;
+}
+
 function renderDetail(group) {
-  const el = document.getElementById('detail');
-  if (!group) { el.innerHTML = '<div class="empty-state"><h2>Select a turn</h2><p>Click an entry in the sidebar or use j/k keys</p></div>'; return; }
+  const dc = getOrCreateDetailContent();
+  if (!group) {
+    dc.innerHTML = '<div class="empty-state"><h2>Select a turn</h2><p>Click an entry in the sidebar or use j/k keys</p></div>';
+    return;
+  }
 
   if (group.type === 'custom' && group.customType === 'pi-goal-hermes:event') {
     const d = group.entry.details || {};
-    el.innerHTML = `
+    dc.innerHTML = `
       <div class="goal-event-block">
         <div class="event-type">${escHtml(d.eventType || 'unknown')}</div>
         <div class="event-details">
@@ -334,14 +371,14 @@ function renderDetail(group) {
     } else {
       text = content || '';
     }
-    el.innerHTML = `<div class="continuation-block"><div class="continuation-label">CONTINUATION PROMPT</div><div class="prompt-text">${escHtml(text)}</div></div>`;
+    dc.innerHTML = `<div class="continuation-block"><div class="continuation-label">CONTINUATION PROMPT</div><div class="prompt-text">${escHtml(text)}</div></div>`;
     return;
   }
 
   if (group.type === 'custom' && group.customType === 'pi-goal-hermes:judge') {
     const d = group.entry.details || {};
     const vcls = d.done ? 'done' : 'continue';
-    el.innerHTML = `
+    dc.innerHTML = `
       <div class="judge-block ${vcls}">
         <div class="judge-header">
           <span class="judge-verdict ${vcls}">${(d.verdict || '?').toUpperCase()}</span>
@@ -369,12 +406,12 @@ function renderDetail(group) {
     } else {
       text = typeof content === 'string' ? content : JSON.stringify(content);
     }
-    el.innerHTML = `<div class="text-block">${escHtml(text)}</div>`;
+    dc.innerHTML = `<div class="text-block">${escHtml(text)}</div>`;
     return;
   }
 
   if (group.type !== 'turn') {
-    el.innerHTML = `<div class="text-block">${escHtml(JSON.stringify(group.entry, null, 2))}</div>`;
+    dc.innerHTML = `<div class="text-block">${escHtml(JSON.stringify(group.entry, null, 2))}</div>`;
     return;
   }
 
@@ -439,7 +476,7 @@ function renderDetail(group) {
     html += `</div>`;
   }
 
-  el.innerHTML = html;
+  dc.innerHTML = html;
 }
 
 function escHtml(s) {
@@ -464,8 +501,31 @@ evtSource.onmessage = (e) => {
   const data = JSON.parse(e.data);
   if (data.type === 'reset') {
     entries = data.entries;
+    if (data.systemPrompt) {
+      document.getElementById('prompt-content').textContent = data.systemPrompt;
+    }
   } else if (data.type === 'delta') {
     entries = entries.concat(data.entries);
+  } else if (data.type === 'system_prompt') {
+    const pc = document.getElementById('prompt-content');
+    pc.textContent = data.prompt || data.userPrompt || '';
+    pc.classList.remove('hidden');
+    return;
+  } else if (data.type === 'session_switch') {
+    const sel = document.getElementById('session-select');
+    if (data.file) {
+      for (const opt of sel.options) {
+        if (opt.value === data.file) { sel.value = data.file; break; }
+      }
+    }
+    entries = [];
+    groups = [];
+    selectedIdx = -1;
+    renderSidebar();
+    renderDetail(null);
+    updateStats();
+    if (data.file) loadSession(data.file);
+    return;
   }
   groups = groupEntries(entries);
   renderSidebar();
@@ -576,6 +636,51 @@ function scrollSelectedIntoView() {
   const active = document.querySelector('.turn-item.active');
   if (active) active.scrollIntoView({ block: 'nearest' });
 }
+
+function toggleAutoFollow() {
+  autoFollow = !autoFollow;
+  const btn = document.getElementById('auto-follow-btn');
+  btn.textContent = autoFollow ? 'Auto: ON' : 'Auto: OFF';
+  btn.classList.toggle('active', autoFollow);
+  fetch('/auto-follow', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ enabled: autoFollow }) }).catch(() => {});
+}
+
+function loadSessions() {
+  fetch('/sessions').then(r => r.json()).then(sessions => {
+    const sel = document.getElementById('session-select');
+    sel.innerHTML = sessions.map(s => {
+      const rawTs = s.sessionTimestamp || s.latestTimestamp;
+      const ts = rawTs ? new Date(rawTs).toLocaleTimeString('en-US', { hour12: false }) : '';
+      let label;
+      if (s.goalText) {
+        const base = s.firstMessage || s.cwd || s.latestFile || '';
+        label = `[Goal] ${base.slice(0, 50)} (${ts})`;
+      } else if (s.firstMessage) {
+        label = `${s.firstMessage.slice(0, 60)} (${ts})`;
+      } else {
+        label = `${(s.cwd || s.latestFile || 'session').slice(0, 60)} (${ts})`;
+      }
+      return `<option value="${escHtml(s.latestFile || '')}">${escHtml(label)}</option>`;
+    }).join('');
+    if (sessions.length > 0) loadSession(sessions[sessions.length - 1].latestFile);
+  }).catch(() => {});
+}
+
+function loadSession(file) {
+  if (!file) return;
+  fetch('/load-session?file=' + encodeURIComponent(file)).then(() => {
+    return fetch('/entries');
+  }).then(r => r.json()).then(data => {
+    entries = data.entries || data;
+    groups = groupEntries(entries);
+    selectedIdx = -1;
+    renderSidebar();
+    renderDetail(null);
+    updateStats();
+  }).catch(() => {});
+}
+
+loadSessions();
 </script>
 </body>
 </html>
