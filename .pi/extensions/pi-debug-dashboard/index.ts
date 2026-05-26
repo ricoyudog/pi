@@ -26,8 +26,7 @@ export default function piDebugDashboard(pi: ExtensionAPI) {
 					ctx.ui.notify(`Dashboard already running at ${server.url}`, "info")
 					return
 				}
-				const logPath = resolve(process.env.HOME ?? "~", ".pi/agent/pi-debug.log")
-				server = createDashboardServer({ logPath, port: DEFAULT_PORT, htmlPath })
+				server = createDashboardServer({ port: DEFAULT_PORT, htmlPath })
 				server.start()
 				ctx.ui.notify(`Debug dashboard started: ${server.url}`, "info")
 				ctx.ui.setStatus("pi-debug-dashboard", `Dashboard: ${server.url}`)
