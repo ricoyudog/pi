@@ -13,6 +13,9 @@ export interface DashboardServer {
 	stop(): void
 	readonly port: number
 	readonly url: string
+	broadcast(data: object): void
+	watchSession(filePath: string): void
+	setSystemPrompt(prompt: string | null): void
 }
 
 interface SessionMeta {
@@ -79,6 +82,7 @@ function peekSessionMeta(filePath: string): SessionMeta | null {
 
 export function createDashboardServer(options: DashboardServerOptions): DashboardServer {
 	const { port, htmlPath } = options
+	let storedSystemPrompt: string | null = null
 	const clients = new Set<ServerResponse>()
 	const sessionsDir = join(homedir(), ".pi/agent/sessions")
 
@@ -146,6 +150,8 @@ export function createDashboardServer(options: DashboardServerOptions): Dashboar
 	let watchedFile: string | null = null
 	let cachedEntries: object[] = []
 	let lastSize = 0
+	let autoFollow = true
+	let autoFollowTimer: ReturnType<typeof setInterval> | null = null
 
 	function watchSession(filePath: string) {
 		watchedFile = filePath
@@ -185,7 +191,7 @@ export function createDashboardServer(options: DashboardServerOptions): Dashboar
 				Connection: "keep-alive",
 				...cors,
 			})
-			res.write(`data: ${JSON.stringify({ type: "reset", entries: cachedEntries, total: cachedEntries.length })}\n\n`)
+			res.write(`data: ${JSON.stringify({ type: "reset", entries: cachedEntries, total: cachedEntries.length, systemPrompt: storedSystemPrompt })}\n\n`)
 			clients.add(res)
 			req.on("close", () => clients.delete(res))
 			return
@@ -238,6 +244,7 @@ export function createDashboardServer(options: DashboardServerOptions): Dashboar
 				res.end("Access denied")
 				return
 			}
+			autoFollow = false
 			watchSession(filePath)
 			res.writeHead(200, { "Content-Type": "application/json", ...cors })
 			res.end(JSON.stringify({ ok: true, entries: cachedEntries.length }))
@@ -262,11 +269,25 @@ export function createDashboardServer(options: DashboardServerOptions): Dashboar
 			return
 		}
 
+		if (req.method === "POST" && url.pathname === "/auto-follow") {
+			let body = ""
+			req.on("data", (chunk) => { body += chunk })
+			req.on("end", () => {
+				try {
+					const parsed = JSON.parse(body) as { enabled: boolean }
+					autoFollow = Boolean(parsed.enabled)
+				} catch {}
+				res.writeHead(200, { "Content-Type": "application/json", ...cors })
+				res.end(JSON.stringify({ autoFollow }))
+			})
+			return
+		}
+
 		res.writeHead(404, cors)
 		res.end("Not found")
 	})
 
-	// Auto-load latest session on startup
+
 	const latest = getLatestSessionFile()
 	if (latest) {
 		cachedEntries = parseSessionEntries(latest)
@@ -278,6 +299,11 @@ export function createDashboardServer(options: DashboardServerOptions): Dashboar
 		port,
 		get url() {
 			return `http://localhost:${port}`
+		},
+		broadcast,
+		watchSession,
+		setSystemPrompt(prompt: string | null) {
+			storedSystemPrompt = prompt
 		},
 		start() {
 			if (watchedFile) {
@@ -298,9 +324,18 @@ export function createDashboardServer(options: DashboardServerOptions): Dashboar
 				}, 500)
 			}
 			server.listen(port)
+			autoFollowTimer = setInterval(() => {
+				if (!autoFollow) return
+				const latestFile = getLatestSessionFile()
+				if (latestFile && latestFile !== watchedFile) {
+					watchSession(latestFile)
+					broadcast({ type: "session_switch", file: latestFile, metadata: peekSessionMeta(latestFile) })
+				}
+			}, 2000)
 		},
 		stop() {
 			if (watchTimer) clearInterval(watchTimer)
+			if (autoFollowTimer) clearInterval(autoFollowTimer)
 			for (const client of clients) client.end()
 			clients.clear()
 			server.close()

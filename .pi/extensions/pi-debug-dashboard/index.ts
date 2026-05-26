@@ -57,4 +57,27 @@ export default function piDebugDashboard(pi: ExtensionAPI) {
 			ctx.ui.notify("Usage: /dashboard [start|stop|status]", "warning")
 		},
 	})
+
+	let lastSystemPrompt: string | null = null
+
+	pi.on("before_agent_start", (event: any, _ctx: any) => {
+		lastSystemPrompt = event.systemPrompt ?? null
+		if (server) {
+			server.setSystemPrompt(lastSystemPrompt)
+			server.broadcast({
+				type: "system_prompt",
+				prompt: event.systemPrompt,
+				userPrompt: event.prompt
+			})
+		}
+	})
+
+	pi.on("session_start", (_event: any, ctx: any) => {
+		if (server && ctx.sessionManager?.getSessionFile) {
+			const sessionFile = ctx.sessionManager.getSessionFile()
+			if (sessionFile) {
+				server.watchSession(sessionFile)
+			}
+		}
+	})
 }
