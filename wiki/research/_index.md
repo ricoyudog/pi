@@ -9,4 +9,5 @@ updated: 2026-05-21
 
 ## Topics
 
-(No research topics yet — these are created during opsx explore)
+- [Publishing Pi Packages](publishing-pi-packages.md) — How to publish extensions to pi.dev/packages community registry
+- [Publish pi-goal-hermes Plan](publish-pi-goal-hermes-plan.md) — Execution plan (COMPLETED: published as @ricoyudog/pi-goal-hermes)
