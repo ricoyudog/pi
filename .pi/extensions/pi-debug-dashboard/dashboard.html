@@ -662,7 +662,7 @@ function loadSessions() {
       }
       return `<option value="${escHtml(s.latestFile || '')}">${escHtml(label)}</option>`;
     }).join('');
-    if (sessions.length > 0) loadSession(sessions[sessions.length - 1].latestFile);
+    if (sessions.length > 0) loadSession(sessions[0].latestFile);
   }).catch(() => {});
 }
 

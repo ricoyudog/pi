@@ -123,7 +123,26 @@ export function createDashboardServer(options: DashboardServerOptions): Dashboar
 		for (const line of content.split("\n")) {
 			if (!line.startsWith("{")) continue
 			try {
-				entries.push(JSON.parse(line))
+				const obj = JSON.parse(line) as Record<string, unknown>
+				if (obj.type === "message" && obj.message) {
+					const msg = obj.message as Record<string, unknown>
+					entries.push({ ...msg, timestamp: msg.timestamp ?? obj.timestamp })
+				} else if (obj.type === "custom_message") {
+					entries.push({
+						role: "custom",
+						customType: obj.customType,
+						content: obj.content,
+						details: obj.details,
+						timestamp: obj.timestamp,
+					})
+				} else if (obj.type === "custom" && obj.customType) {
+					entries.push({
+						role: "custom",
+						customType: obj.customType,
+						details: obj.data,
+						timestamp: obj.timestamp,
+					})
+				}
 			} catch {}
 		}
 		return entries
