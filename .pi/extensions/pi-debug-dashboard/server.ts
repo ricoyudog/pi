@@ -16,6 +16,7 @@ export interface DashboardServer {
 	broadcast(data: object): void
 	watchSession(filePath: string): void
 	setSystemPrompt(prompt: string | null): void
+	resetRuntimeBuffer(): void
 }
 
 interface SessionMeta {
@@ -84,7 +85,16 @@ export function createDashboardServer(options: DashboardServerOptions): Dashboar
 	const { port, htmlPath } = options
 	let storedSystemPrompt: string | null = null
 	const clients = new Set<ServerResponse>()
+	const MAX_RUNTIME_EVENTS = 500
+	const runtimeBuffer: object[] = []
 	const sessionsDir = join(homedir(), ".pi/agent/sessions")
+
+	function pushRuntimeEvent(event: object): void {
+		runtimeBuffer.push(event)
+		while (runtimeBuffer.length > MAX_RUNTIME_EVENTS) runtimeBuffer.shift()
+		const msg = `data: ${JSON.stringify(event)}\n\n`
+		for (const client of clients) client.write(msg)
+	}
 
 	function getSessionDirs(): string[] {
 		if (!existsSync(sessionsDir)) return []
@@ -161,6 +171,11 @@ export function createDashboardServer(options: DashboardServerOptions): Dashboar
 	}
 
 	function broadcast(data: object) {
+		const dataAny = data as any
+		if (dataAny.type && typeof dataAny.type === "string" && dataAny.type.startsWith("runtime:")) {
+			pushRuntimeEvent(data)
+			return
+		}
 		const msg = `data: ${JSON.stringify(data)}\n\n`
 		for (const client of clients) client.write(msg)
 	}
@@ -210,7 +225,7 @@ export function createDashboardServer(options: DashboardServerOptions): Dashboar
 				Connection: "keep-alive",
 				...cors,
 			})
-			res.write(`data: ${JSON.stringify({ type: "reset", entries: cachedEntries, total: cachedEntries.length, systemPrompt: storedSystemPrompt })}\n\n`)
+			res.write(`data: ${JSON.stringify({ type: "reset", entries: cachedEntries, total: cachedEntries.length, systemPrompt: storedSystemPrompt, runtimeEvents: runtimeBuffer })}\n\n`)
 			clients.add(res)
 			req.on("close", () => clients.delete(res))
 			return
@@ -276,6 +291,12 @@ export function createDashboardServer(options: DashboardServerOptions): Dashboar
 			return
 		}
 
+		if (url.pathname === "/runtime-events") {
+			res.writeHead(200, { "Content-Type": "application/json", ...cors })
+			res.end(JSON.stringify(runtimeBuffer))
+			return
+		}
+
 		if (url.pathname === "/" || url.pathname === "/index.html") {
 			try {
 				const html = readFileSync(htmlPath, "utf-8")
@@ -323,6 +344,9 @@ export function createDashboardServer(options: DashboardServerOptions): Dashboar
 		watchSession,
 		setSystemPrompt(prompt: string | null) {
 			storedSystemPrompt = prompt
+		},
+		resetRuntimeBuffer() {
+			runtimeBuffer.length = 0
 		},
 		start() {
 			if (watchedFile) {
