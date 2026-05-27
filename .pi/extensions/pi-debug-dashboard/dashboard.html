@@ -115,6 +115,54 @@ body { font-family: 'SF Mono', 'Fira Code', monospace; background: #0d1117; colo
 .prompt-toggle { float: right; font-size: 10px; }
 .prompt-content { padding: 8px 12px; font-size: 11px; white-space: pre-wrap; word-break: break-word; max-height: 400px; overflow-y: auto; color: #c9d1d9; line-height: 1.5; }
 .prompt-content.hidden { display: none; }
+
+.startup-panel { margin: 8px 16px; border: 1px solid #21262d; border-radius: 4px; background: #161b22; }
+.startup-header { padding: 6px 12px; font-size: 11px; color: #8b949e; cursor: pointer; user-select: none; border-bottom: 1px solid #21262d; }
+.startup-header:hover { color: #c9d1d9; }
+.startup-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 6px; padding: 8px 12px; }
+.startup-item { font-size: 10px; }
+.startup-item .slabel { color: #8b949e; }
+.startup-item .svalue { color: #c9d1d9; margin-top: 1px; }
+
+.startup-tags { padding: 4px 12px 8px; display: flex; flex-wrap: wrap; gap: 3px; }
+.startup-tag { background: #21262d; border: 1px solid #30363d; border-radius: 3px; padding: 1px 5px; font-size: 9px; color: #8b949e; }
+
+.context-gauge { margin: 8px 0 12px; padding: 10px 12px; background: #161b22; border: 1px solid #21262d; border-radius: 4px; }
+.gauge-label { font-size: 10px; color: #8b949e; margin-bottom: 4px; display: flex; justify-content: space-between; }
+.gauge-outer { background: #0d1117; border-radius: 4px; height: 10px; overflow: hidden; }
+.gauge-fill { height: 100%; border-radius: 4px; transition: width 0.3s; }
+.gauge-fill.safe { background: #238636; }
+.gauge-fill.warn { background: #d29922; }
+.gauge-fill.danger { background: #da3633; }
+.gauge-detail { font-size: 9px; color: #484f58; margin-top: 3px; }
+
+.tool-timeline { margin: 12px 0; }
+.timeline-label { font-size: 10px; color: #8b949e; margin-bottom: 6px; border-bottom: 1px solid #21262d; padding-bottom: 4px; }
+.gantt-row { position: relative; height: 22px; margin: 1px 0; display: flex; align-items: center; }
+.gantt-label { position: absolute; left: 0; font-size: 10px; color: #8b949e; width: 90px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; z-index: 1; }
+.gantt-track { position: absolute; left: 95px; right: 0; height: 100%; }
+.gantt-bar { position: absolute; height: 16px; top: 3px; border-radius: 3px; font-size: 9px; padding: 0 4px; overflow: hidden; white-space: nowrap; color: #0d1117; cursor: pointer; display: flex; align-items: center; min-width: 4px; }
+.gantt-bar.read { background: #58a6ff; }
+.gantt-bar.bash { background: #f0883e; }
+.gantt-bar.edit { background: #7ee787; }
+.gantt-bar.write { background: #a371f7; }
+.gantt-bar.grep { background: #484f58; }
+.gantt-bar.find { background: #484f58; }
+.gantt-bar.ls { background: #484f58; }
+.gantt-bar.default { background: #79c0ff; }
+.gantt-bar.running { background: repeating-linear-gradient(45deg, #d29922, #d29922 3px, #b08820 3px, #b08820 6px); color: #0d1117; }
+.gantt-duration { position: absolute; right: 2px; font-size: 8px; color: #c9d1d9; }
+
+.compaction-block { background: #0d2d2d; border: 1px solid #1a4a4a; border-radius: 6px; padding: 12px; margin-bottom: 12px; }
+.compaction-block .compaction-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
+.compaction-block .compaction-meta { font-size: 10px; color: #8b949e; }
+.compaction-block .compaction-metrics { display: grid; grid-template-columns: repeat(auto-fill, minmax(100px, 1fr)); gap: 6px; margin-bottom: 8px; }
+.compaction-block .compaction-metric { background: #161b22; border: 1px solid #21262d; border-radius: 4px; padding: 6px 8px; font-size: 10px; }
+.compaction-block .compaction-metric .mlabel { color: #8b949e; font-size: 9px; }
+.compaction-block .compaction-metric .mvalue { color: #79c0ff; font-size: 14px; margin-top: 2px; }
+.compaction-summary { background: #0d1a14; border: 1px solid #1a3d2d; border-radius: 4px; padding: 8px; font-size: 11px; color: #8b949e; white-space: pre-wrap; word-break: break-word; max-height: 200px; overflow-y: auto; }
+
+.turn-item.compaction { border-left: 3px solid #3fb950; }
 </style>
 </head>
 <body>
@@ -139,6 +187,7 @@ body { font-family: 'SF Mono', 'Fira Code', monospace; background: #0d1117; colo
         <button class="filter-btn active" data-filter="goal">Goal</button>
         <button class="filter-btn active" data-filter="judge">Judge</button>
         <button class="filter-btn active" data-filter="continuation">Continue</button>
+        <button class="filter-btn active" data-filter="compact">Compact</button>
       </div>
     </div>
     <div class="turn-list" id="turn-list"></div>
@@ -149,6 +198,13 @@ body { font-family: 'SF Mono', 'Fira Code', monospace; background: #0d1117; colo
         System Prompt <span class="prompt-toggle">[show/hide]</span>
       </div>
       <pre class="prompt-content hidden" id="prompt-content"></pre>
+    </div>
+    <div class="startup-panel" id="startup-panel" style="display:none">
+      <div class="startup-header" onclick="const g=document.getElementById('startup-grid');g.style.display=g.style.display==='none'?'':'none'">
+        Startup Info <span style="float:right;font-size:10px">[show/hide]</span>
+      </div>
+      <div id="startup-grid" style="display:block" class="startup-grid"></div>
+      <div class="startup-tags" id="startup-tags"></div>
     </div>
   </div>
 </div>
@@ -161,8 +217,161 @@ let groups = [];
 let selectedIdx = -1;
 let autoScroll = true;
 let autoFollow = true;
+const runtimeState = {
+  init: null,
+  gaugeByTurn: {},
+  toolsByTurn: {},
+  compactions: [],
+};
 let searchQuery = '';
-let activeFilters = new Set(['all', 'turn', 'user', 'goal', 'judge', 'continuation']);
+let activeFilters = new Set(['all', 'turn', 'user', 'goal', 'judge', 'continuation', 'compact']);
+
+function handleRuntimeEvent(data) {
+  switch (data.type) {
+    case 'runtime:init':
+      runtimeState.init = data;
+      renderStartupPanel(data);
+      break;
+    case 'runtime:turn_end':
+      runtimeState.gaugeByTurn[data.turnIndex] = data;
+      break;
+    case 'runtime:tool_start': {
+      if (!runtimeState.toolsByTurn[data.turnIndex]) runtimeState.toolsByTurn[data.turnIndex] = [];
+      runtimeState.toolsByTurn[data.turnIndex].push({ ...data, endedAt: null, durationMs: null });
+      break;
+    }
+    case 'runtime:tool_end': {
+      const tools = runtimeState.toolsByTurn[data.turnIndex];
+      if (tools) {
+        const tool = tools.find(t => t.toolCallId === data.toolCallId);
+        if (tool) {
+          tool.endedAt = data.timestamp;
+          tool.durationMs = data.durationMs;
+          tool.isError = data.isError;
+        }
+      }
+      break;
+    }
+    case 'runtime:compaction':
+      runtimeState.compactions.push(data);
+      groups = buildGroups();
+      break;
+  }
+}
+
+function renderStartupPanel(data) {
+  const panel = document.getElementById('startup-panel');
+  if (!panel || !data) return;
+  panel.style.display = 'block';
+  const grid = document.getElementById('startup-grid');
+  const items = [];
+  if (data.model) items.push(`<div class="startup-item"><div class="slabel">Model</div><div class="svalue">${escHtml(data.model)}</div></div>`);
+  if (data.timestamp) items.push(`<div class="startup-item"><div class="slabel">Started</div><div class="svalue">${formatTime(data.timestamp)}</div></div>`);
+  if (data.systemPromptLength) items.push(`<div class="startup-item"><div class="slabel">Sys Prompt</div><div class="svalue">${(data.systemPromptLength/1000).toFixed(1)}k chars</div></div>`);
+  grid.innerHTML = items.join('');
+
+  const tags = document.getElementById('startup-tags');
+  const tagItems = [];
+  if (data.selectedTools && data.selectedTools.length) {
+    data.selectedTools.forEach(t => tagItems.push(`<span class="startup-tag">tool:${escHtml(t)}</span>`));
+  }
+  if (data.skills && data.skills.length) {
+    data.skills.forEach(s => tagItems.push(`<span class="startup-tag">skill:${escHtml(s)}</span>`));
+  }
+  if (data.contextFiles && data.contextFiles.length) {
+    data.contextFiles.forEach(f => tagItems.push(`<span class="startup-tag">file:${escHtml(f)}</span>`));
+  }
+  tags.innerHTML = tagItems.join('');
+}
+
+function renderContextGauge(data) {
+  const pct = data.percent;
+  if (pct === null || pct === undefined) {
+    return `<div class="context-gauge"><div class="gauge-label">Context Usage <span>Recalculating...</span></div><div class="gauge-outer"><div class="gauge-fill safe" style="width:0%"></div></div></div>`;
+  }
+  const cls = pct < 60 ? 'safe' : pct < 80 ? 'warn' : 'danger';
+  const tokensStr = data.tokens ? data.tokens.toLocaleString() : '?';
+  const windowStr = data.contextWindow ? data.contextWindow.toLocaleString() : '?';
+  return `<div class="context-gauge">
+    <div class="gauge-label">Context Usage <span>${pct.toFixed(1)}%</span></div>
+    <div class="gauge-outer"><div class="gauge-fill ${cls}" style="width:${Math.min(pct, 100)}%"></div></div>
+    <div class="gauge-detail">${tokensStr} / ${windowStr} tokens</div>
+  </div>`;
+}
+
+function renderToolTimeline(turnIndex) {
+  const tools = runtimeState.toolsByTurn[turnIndex];
+  if (!tools || !tools.length) return '';
+
+  const allTimes = tools.filter(t => t.timestamp).map(t => t.timestamp);
+  const turnStart = Math.min(...allTimes);
+  const finalEnds = tools.map(t => t.endedAt || Date.now());
+  const turnEnd = Math.max(...finalEnds);
+  const turnDuration = turnEnd - turnStart;
+  if (turnDuration <= 0) return '';
+
+  const rows = [];
+  for (const tool of tools) {
+    const tStart = tool.timestamp - turnStart;
+    const tEnd = (tool.endedAt || Date.now()) - turnStart;
+    let placed = false;
+    for (const row of rows) {
+      const last = row[row.length - 1];
+      if (!last || (last.endedAt - turnStart) <= tStart) {
+        row.push(tool);
+        placed = true;
+        break;
+      }
+    }
+    if (!placed) rows.push([tool]);
+  }
+
+  let html = '<div class="tool-timeline"><div class="timeline-label">Tool Timeline (' + tools.length + ' tools)</div>';
+  for (const row of rows) {
+    html += '<div class="gantt-row"><div class="gantt-track">';
+    for (const tool of row) {
+      const tStart = tool.timestamp - turnStart;
+      const tEnd = (tool.endedAt || Date.now()) - turnStart;
+      const leftPct = (tStart / turnDuration * 100).toFixed(1);
+      const widthPct = Math.max(((tEnd - tStart) / turnDuration * 100), 0.5).toFixed(1);
+      const name = tool.toolName || '?';
+      const colorClass = ['read','bash','edit','write','grep','find','ls'].includes(name) ? name : 'default';
+      const isRunning = tool.endedAt === null;
+      const durLabel = isRunning ? 'running...' : (tool.durationMs != null ? tool.durationMs + 'ms' : '?');
+      const barCls = isRunning ? 'running' : colorClass;
+      html += `<div class="gantt-bar ${barCls}" style="left:${leftPct}%;width:${widthPct}%" title="${escHtml(name)}: ${durLabel}">${escHtml(name)}</div>`;
+    }
+    html += '</div></div>';
+  }
+  html += '</div>';
+  return html;
+}
+
+function buildGroups() {
+  const result = groupEntries(entries);
+  for (const c of runtimeState.compactions) {
+    result.push({
+      type: 'compaction',
+      data: c,
+      index: result.length
+    });
+  }
+  result.sort((a, b) => {
+    const at = getGroupTimestamp(a);
+    const bt = getGroupTimestamp(b);
+    return at - bt;
+  });
+  result.forEach((g, i) => { g.index = i; });
+  return result;
+}
+
+function getGroupTimestamp(group) {
+  if (group.type === 'compaction') return group.data.timestamp || 0;
+  if (group.type === 'turn') return group.assistant.timestamp || '';
+  if (group.type === 'custom') return group.entry.timestamp || '';
+  if (group.type === 'user') return group.entry.timestamp || '';
+  return '';
+}
 
 function groupEntries(rawEntries) {
   const result = [];
@@ -204,6 +413,7 @@ function formatTime(ts) {
 }
 
 function getGroupFilterType(group) {
+  if (group.type === 'compaction') return 'compact';
   if (group.type === 'turn') return 'turn';
   if (group.type === 'user') return 'user';
   if (group.type === 'custom') {
@@ -215,6 +425,9 @@ function getGroupFilterType(group) {
 }
 
 function getPreview(group) {
+  if (group.type === 'compaction') {
+    return 'Compaction — ' + (group.data.tokensBefore || 0).toLocaleString() + ' tokens before';
+  }
   if (group.type === 'custom') {
     const ct = group.customType;
     if (ct === 'pi-goal-hermes:event') {
@@ -285,7 +498,11 @@ function renderSidebar() {
     let numLabel = '';
     let meta = '';
 
-    if (g.type === 'turn') {
+    if (g.type === 'compaction') {
+      cls = 'compaction';
+      numLabel = 'Compact';
+      meta = [formatTime(g.data.timestamp), g.data.tokensBefore ? g.data.tokensBefore.toLocaleString() + ' tok' : ''].filter(Boolean).join(' | ');
+    } else if (g.type === 'turn') {
       turnNum++;
       numLabel = `Turn ${turnNum}`;
       const a = g.assistant;
@@ -345,6 +562,20 @@ function renderDetail(group) {
   const dc = getOrCreateDetailContent();
   if (!group) {
     dc.innerHTML = '<div class="empty-state"><h2>Select a turn</h2><p>Click an entry in the sidebar or use j/k keys</p></div>';
+    return;
+  }
+
+  if (group.type === 'compaction') {
+    const d = group.data;
+    dc.innerHTML = `
+      <div class="compaction-block">
+        <div class="compaction-header"><strong style="color:#3fb950;font-size:13px">Context Compaction</strong><span class="compaction-meta">${formatTime(d.timestamp)}</span></div>
+        <div class="compaction-metrics">
+          <div class="compaction-metric"><div class="mlabel">Tokens Before</div><div class="mvalue">${(d.tokensBefore || 0).toLocaleString()}</div></div>
+          <div class="compaction-metric"><div class="mlabel">Summary Length</div><div class="mvalue">${(d.summaryLength || 0).toLocaleString()} chars</div></div>
+        </div>
+        ${d.summaryLength > 0 ? `<div class="detail-section"><h3 class="collapsible" onclick="this.classList.toggle('open')">Compaction Summary</h3><div class="collapsible-body"><div class="compaction-summary">(summary text loaded from session data; ${d.summaryLength.toLocaleString()} chars)</div></div></div>` : ''}
+      </div>`;
     return;
   }
 
@@ -429,6 +660,11 @@ function renderDetail(group) {
     <div class="meta-card"><div class="label">Time</div><div class="value">${formatTime(a.timestamp)}</div></div>
   </div>`;
 
+  const gaugeData = runtimeState.gaugeByTurn[group.index];
+  if (gaugeData) {
+    html += renderContextGauge(gaugeData);
+  }
+
   const blocks = a.content || [];
 
   const thinking = blocks.filter(b => b.type === 'thinking');
@@ -439,6 +675,8 @@ function renderDetail(group) {
     }
     html += `</div></div>`;
   }
+
+  html += renderToolTimeline(group.index);
 
   const textBlocks = blocks.filter(b => b.type === 'text');
   if (textBlocks.length) {
@@ -499,10 +737,23 @@ function updateStats() {
 const evtSource = new EventSource('/events');
 evtSource.onmessage = (e) => {
   const data = JSON.parse(e.data);
+
+  if (data.type && data.type.startsWith && data.type.startsWith('runtime:')) {
+    handleRuntimeEvent(data);
+    if (data.type === 'runtime:init' || data.type === 'runtime:turn_end' || data.type === 'runtime:compaction') {
+      renderSidebar();
+      updateStats();
+    }
+    return;
+  }
+
   if (data.type === 'reset') {
     entries = data.entries;
     if (data.systemPrompt) {
       document.getElementById('prompt-content').textContent = data.systemPrompt;
+    }
+    if (data.runtimeEvents && Array.isArray(data.runtimeEvents)) {
+      data.runtimeEvents.forEach(e => handleRuntimeEvent(e));
     }
   } else if (data.type === 'delta') {
     entries = entries.concat(data.entries);
@@ -527,7 +778,7 @@ evtSource.onmessage = (e) => {
     if (data.file) loadSession(data.file);
     return;
   }
-  groups = groupEntries(entries);
+  groups = buildGroups();
   renderSidebar();
   updateStats();
   if (selectedIdx >= 0 && selectedIdx < groups.length) {
@@ -567,7 +818,7 @@ document.querySelectorAll('.filter-btn').forEach(btn => {
         activeFilters.add(filter);
       }
       const allBtn = document.querySelector('[data-filter="all"]');
-      const nonAllFilters = ['turn', 'user', 'goal', 'judge', 'continuation'];
+      const nonAllFilters = ['turn', 'user', 'goal', 'judge', 'continuation', 'compact'];
       if (nonAllFilters.every(f => activeFilters.has(f))) {
         allBtn.classList.add('active');
         activeFilters.add('all');
@@ -672,7 +923,7 @@ function loadSession(file) {
     return fetch('/entries');
   }).then(r => r.json()).then(data => {
     entries = data.entries || data;
-    groups = groupEntries(entries);
+    groups = buildGroups();
     selectedIdx = -1;
     renderSidebar();
     renderDetail(null);
