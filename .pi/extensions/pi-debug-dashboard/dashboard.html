@@ -286,7 +286,7 @@ function renderStartupPanel(data) {
 
 function renderContextGauge(data) {
   const pct = data.percent;
-  if (pct === null || pct === undefined) {
+  if (pct === null || pct === undefined || data.tokens === null || data.tokens === undefined) {
     return `<div class="context-gauge"><div class="gauge-label">Context Usage <span>Recalculating...</span></div><div class="gauge-outer"><div class="gauge-fill safe" style="width:0%"></div></div></div>`;
   }
   const cls = pct < 60 ? 'safe' : pct < 80 ? 'warn' : 'danger';
@@ -660,7 +660,8 @@ function renderDetail(group) {
     <div class="meta-card"><div class="label">Time</div><div class="value">${formatTime(a.timestamp)}</div></div>
   </div>`;
 
-  const gaugeData = runtimeState.gaugeByTurn[group.index];
+  const turnCount = groups.filter((g, i) => i < selectedIdx && g.type === 'turn').length;
+  const gaugeData = runtimeState.gaugeByTurn[turnCount];
   if (gaugeData) {
     html += renderContextGauge(gaugeData);
   }
@@ -676,7 +677,7 @@ function renderDetail(group) {
     html += `</div></div>`;
   }
 
-  html += renderToolTimeline(group.index);
+  html += renderToolTimeline(turnCount);
 
   const textBlocks = blocks.filter(b => b.type === 'text');
   if (textBlocks.length) {
@@ -752,6 +753,10 @@ evtSource.onmessage = (e) => {
     if (data.systemPrompt) {
       document.getElementById('prompt-content').textContent = data.systemPrompt;
     }
+    runtimeState.init = null;
+    runtimeState.gaugeByTurn = {};
+    runtimeState.toolsByTurn = {};
+    runtimeState.compactions = [];
     if (data.runtimeEvents && Array.isArray(data.runtimeEvents)) {
       data.runtimeEvents.forEach(e => handleRuntimeEvent(e));
     }
@@ -772,6 +777,10 @@ evtSource.onmessage = (e) => {
     entries = [];
     groups = [];
     selectedIdx = -1;
+    runtimeState.init = null;
+    runtimeState.gaugeByTurn = {};
+    runtimeState.toolsByTurn = {};
+    runtimeState.compactions = [];
     renderSidebar();
     renderDetail(null);
     updateStats();
